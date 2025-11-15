@@ -4,7 +4,7 @@ import { type NextRequest, NextResponse } from "next/server"
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { questionId, query, retrievedDocs, conversationHistory } = body
+    const { questionId, query, retrievedDocs, conversationHistory, chainLength } = body
 
     console.log("[v0] 答案生成接口收到请求:", { questionId, query })
 
@@ -28,6 +28,21 @@ export async function POST(request: NextRequest) {
       answer = `我理解您的问题是关于"${query}"。基于我的知识库检索，我为您提供以下信息：\n\n这是一个多模态AI助手的演示系统，支持文本、图片、文件和语音等多种输入方式。系统采用向量检索技术快速定位相关知识，并通过自成长机制不断优化回答质量。\n\n如果您有更具体的问题，欢迎继续提问！`
     }
 
+    const chainLen = typeof chainLength === "number" ? chainLength : 3
+    const baseSteps = [
+      "识别问题类型",
+      "检索相关文档",
+      "筛选与排序",
+    ]
+    const extraSteps =
+      chainLen >= 10
+        ? ["抽取关键点", "草拟答案", "一致性检查", "反思修正"]
+        : chainLen >= 6
+        ? ["抽取关键点", "草拟答案"]
+        : chainLen >= 4
+        ? ["抽取关键点"]
+        : []
+    const thinking = [...baseSteps, ...extraSteps].map((s, i) => `${i + 1}. ${s}`)
     const response = {
       success: true,
       data: {
@@ -41,6 +56,7 @@ export async function POST(request: NextRequest) {
           completion: 128,
           total: 384,
         },
+        thinking,
       },
       message: "生成完成",
     }

@@ -2,13 +2,18 @@
 
 import type React from "react"
 
-import { useState, useRef, useEffect } from "react"
+import { useState, useRef, useEffect, useMemo } from "react"
+import { encode as encodeCl100k } from "gpt-tokenizer/encoding/cl100k_base"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ScrollArea } from "@/components/ui/scroll-area"
+import { Slider } from "@/components/ui/slider"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { MessageSquare, Settings, Paperclip, ImageIcon, Mic, Send, Plus, Sparkles, X, Trash2 } from "lucide-react"
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
+import { MessageSquare, Settings, Paperclip, ImageIcon, Mic, Send, Plus, Sparkles, X, Trash2, ChevronDown, ClipboardPaste, RotateCcw, ThumbsUp, ThumbsDown, BarChart2, Activity } from "lucide-react"
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts"
 import { Switch } from "@/components/ui/switch"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
 
 type Message = {
@@ -26,6 +31,7 @@ type Message = {
     generationTime?: number
     confidence?: number
     sources?: string[]
+    thinking?: string[]
   }
 }
 
@@ -38,7 +44,7 @@ type Conversation = {
 }
 
 export function MultimodalChat() {
-  const [activeView, setActiveView] = useState<"chat" | "settings">("chat")
+  const [activeView, setActiveView] = useState<"chat" | "settings" | "dashboard">("chat")
 
   const [conversations, setConversations] = useState<Conversation[]>([
     {
@@ -48,7 +54,7 @@ export function MultimodalChat() {
         {
           id: "1",
           role: "assistant",
-          content: "您好！我是多模态AI助手，可以处理文本、图片、文件和语音。请问有什么可以帮助您的？",
+          content: "您好！请问有什么可以帮助您的？",
         },
       ],
       createdAt: new Date(),
@@ -71,41 +77,308 @@ export function MultimodalChat() {
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
   const [isLoading, setIsLoading] = useState(false)
+  const [feedbacks, setFeedbacks] = useState<Record<string, "up" | "down" | undefined>>({})
+  const [growthSources, setGrowthSources] = useState({ auto: 0, user: 0, manual: 0 })
+  const [effBaseline, setEffBaseline] = useState<null | { avgRetrieval: number; avgGeneration: number; timestamp: string }>(null)
+  const [activeSlice, setActiveSlice] = useState<number | null>(null)
+  const [growthEvents, setGrowthEvents] = useState<Array<{ type: "auto" | "user" | "manual"; ts: number }>>([])
 
   // 模型设置状态
   const [streamEnabled, setStreamEnabled] = useState(true)
   const [maxTokens, setMaxTokens] = useState(2048)
   const [maxTokensEnabled, setMaxTokensEnabled] = useState(false)
-
-  // 流式输出状态
-  const [streamingContent, setStreamingContent] = useState("")
-  const [isStreaming, setIsStreaming] = useState(false)
-
-  // 将流式内容实时写入最后一条助手消息
-  useEffect(() => {
-    if (!isStreaming || !streamingContent) return
-    setConversations((prev) =>
-      prev.map((conv) => {
-        if (conv.id !== currentConversationId) return conv
-        const lastMsg = conv.messages.at(-1)
-        if (!lastMsg || lastMsg.role !== "assistant") return conv
-        return {
-          ...conv,
-          messages: [
-            ...conv.messages.slice(0, -1),
-            { ...lastMsg, content: streamingContent },
-          ],
-          updatedAt: new Date(),
-        }
-      }),
-    )
-  }, [streamingContent, isStreaming, currentConversationId])
+  const [selectedModel, setSelectedModel] = useState("GPT-4 Turbo")
+  const [temperature, setTemperature] = useState(0.7)
+  const [chainLength, setChainLength] = useState(2)
+  const [chainLevel, setChainLevel] = useState("basic")
 
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const streamIntervalRef = useRef<NodeJS.Timeout | null>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+  const chatInputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
+  }, [messages])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("effBaseline")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed && typeof parsed.avgRetrieval === "number" && typeof parsed.avgGeneration === "number") {
+          setEffBaseline(parsed)
+        }
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("growthEvents")
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (Array.isArray(parsed)) setGrowthEvents(parsed)
+      }
+    } catch {}
+  }, [])
+
+  const isDefaultGreeting = (text: string) => text.trim() === "您好！请问有什么可以帮助您的？"
+
+  const handleFeedback = (messageId: string, rating: "up" | "down") => {
+    setFeedbacks((prev) => ({ ...prev, [messageId]: rating }))
+  }
+
+  const analytics = useMemo(() => {
+    const all = conversations.flatMap((c) => c.messages)
+    const assistants = all.filter((m) => m.role === "assistant" && !isDefaultGreeting(m.content))
+    const avg = (arr: number[]) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0)
+    const retrievals = assistants.map((m) => m.metadata?.retrievalTime || 0).filter((v) => v > 0)
+    const generations = assistants.map((m) => m.metadata?.generationTime || 0).filter((v) => v > 0)
+    const completionTokens = assistants.map((m) => encodeCl100k(m.content).length).filter((v) => v > 0)
+    const up = Object.entries(feedbacks).filter(([, v]) => v === "up").length
+    const down = Object.entries(feedbacks).filter(([, v]) => v === "down").length
+    const sourceMap: Record<string, number> = {}
+    assistants.forEach((m) => {
+      const src = m.metadata?.sources || []
+      src.forEach((s) => {
+        sourceMap[s] = (sourceMap[s] || 0) + 1
+      })
+    })
+    const sources = Object.entries(sourceMap)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+    return {
+      totalMessages: all.length,
+      assistantMessages: assistants.length,
+      avgRetrieval: avg(retrievals),
+      avgGeneration: avg(generations),
+      avgCompletionTokens: avg(completionTokens),
+      up,
+      down,
+      sources,
+    }
+  }, [conversations, feedbacks])
+
+  const copyAssistantToClipboard = async (text: string) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch {}
+  }
+
+  const saveEfficiencyBaseline = () => {
+    const b = { avgRetrieval: analytics.avgRetrieval, avgGeneration: analytics.avgGeneration, timestamp: new Date().toISOString() }
+    setEffBaseline(b)
+    try {
+      localStorage.setItem("effBaseline", JSON.stringify(b))
+    } catch {}
+  }
+
+  const pushGrowthEvent = (type: "auto" | "user" | "manual", count = 1) => {
+    const now = Date.now()
+    const events = Array.from({ length: count }, () => ({ type, ts: now }))
+    setGrowthEvents((prev) => {
+      const next = [...prev, ...events]
+      try {
+        localStorage.setItem("growthEvents", JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  const weeklyCounts = useMemo(() => {
+    const weekAgo = Date.now() - 7 * 24 * 3600 * 1000
+    const counts = { auto: 0, user: 0, manual: 0 }
+    growthEvents.forEach((e) => {
+      if (e.ts >= weekAgo) counts[e.type] += 1
+    })
+    return counts
+  }, [growthEvents])
+
+  const lighten = (hex: string, ratio: number) => {
+    const h = hex.replace("#", "")
+    const bigint = parseInt(h, 16)
+    const r = (bigint >> 16) & 255
+    const g = (bigint >> 8) & 255
+    const b = bigint & 255
+    const nr = Math.round(r * (1 - ratio) + 255 * ratio)
+    const ng = Math.round(g * (1 - ratio) + 255 * ratio)
+    const nb = Math.round(b * (1 - ratio) + 255 * ratio)
+    const toHex = (v: number) => v.toString(16).padStart(2, "0")
+    return `#${toHex(nr)}${toHex(ng)}${toHex(nb)}`
+  }
+
+  const growthData = useMemo(
+    () => [
+      { key: "auto" as const, name: "自动学习", value: growthSources.auto, color: "#547CAE" },
+      { key: "user" as const, name: "用户交互", value: growthSources.user, color: "#82AADB" },
+      { key: "manual" as const, name: "人工补充", value: growthSources.manual, color: "#CAD8D9" },
+    ],
+    [growthSources],
+  )
+  const totalGrowth = useMemo(() => growthData.reduce((s, d) => s + d.value, 0), [growthData])
+
+  const GrowthTooltip = ({ active, payload }: any) => {
+    if (active && payload && payload.length) {
+      const p = payload[0]
+      const entry = p.payload
+      const percent = totalGrowth > 0 ? Math.round((entry.value / totalGrowth) * 100) : 0
+      const w = weeklyCounts[entry.key as "auto" | "user" | "manual"] || 0
+      return (
+        <div className="bg-popover text-popover-foreground border border-border rounded-lg p-2 text-xs">
+          {`${entry.name}占比 ${percent}%，本周新增 ${w} 条`}
+        </div>
+      )
+    }
+    return null
+  }
+
+  const regenerateAnswer = async (assistantMessageId: string) => {
+    const conv = conversations.find((c) => c.id === currentConversationId)
+    if (!conv) return
+    const idx = conv.messages.findIndex((m) => m.id === assistantMessageId)
+    let userMsg: Message | undefined
+    for (let i = idx - 1; i >= 0; i--) {
+      if (conv.messages[i].role === "user") {
+        userMsg = conv.messages[i]
+        break
+      }
+    }
+    if (!userMsg) {
+      const lastUser = [...conv.messages].reverse().find((m) => m.role === "user")
+      if (!lastUser) return
+      userMsg = lastUser
+    }
+
+    setIsLoading(true)
+    try {
+      const questionResponse = await fetch("/api/chat/question", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: userMsg.content,
+          conversationId: currentConversationId,
+          attachments: (userMsg.attachments || []).map((a) => ({ type: a.type, name: a.name })),
+          stream: streamEnabled,
+          maxTokens: maxTokensEnabled ? maxTokens : undefined,
+          chainLength,
+        }),
+      })
+      const questionData = await questionResponse.json()
+
+      const retrieveResponse = await fetch("/api/chat/retrieve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: questionData.data.questionId,
+          query: userMsg.content,
+        }),
+      })
+      const retrieveData = await retrieveResponse.json()
+
+      const generateResponse = await fetch("/api/chat/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          questionId: questionData.data.questionId,
+          query: userMsg.content,
+          retrievedDocs: retrieveData.data.results,
+          conversationHistory: conv.messages.slice(-5),
+          chainLength,
+        }),
+      })
+      const generateData = await generateResponse.json()
+
+      const meta = {
+        questionId: questionData.data.questionId,
+        retrievalTime: retrieveData.data.retrievalTime,
+        generationTime: generateData.data.generationTime,
+        confidence: generateData.data.confidence,
+        sources: generateData.data.sources,
+        thinking: generateData.data.thinking,
+      }
+
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === currentConversationId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantMessageId
+                    ? { ...m, content: streamEnabled ? "" : generateData.data.answer, metadata: meta }
+                    : m,
+                ),
+                updatedAt: new Date(),
+              }
+            : c,
+        ),
+      )
+
+      setGrowthSources((s) => ({ ...s, auto: s.auto + 1 }))
+      pushGrowthEvent("auto", 1)
+
+      if (streamEnabled) {
+        const full = generateData.data.answer as string
+        let i = 0
+        const step = 8
+        if (streamIntervalRef.current) clearInterval(streamIntervalRef.current)
+        streamIntervalRef.current = setInterval(() => {
+          i += step
+          const slice = full.slice(0, i)
+          setConversations((prev) =>
+            prev.map((c) =>
+              c.id === currentConversationId
+                ? {
+                    ...c,
+                    messages: c.messages.map((m) => (m.id === assistantMessageId ? { ...m, content: slice } : m)),
+                    updatedAt: new Date(),
+                  }
+                : c,
+            ),
+          )
+          if (i >= full.length) {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current)
+              streamIntervalRef.current = null
+            }
+          }
+        }, 30)
+      }
+    } catch (e) {
+      setConversations((prev) =>
+        prev.map((c) =>
+          c.id === currentConversationId
+            ? {
+                ...c,
+                messages: c.messages.map((m) =>
+                  m.id === assistantMessageId ? { ...m, content: "抱歉，重新生成失败，请稍后重试。" } : m,
+                ),
+                updatedAt: new Date(),
+              }
+            : c,
+        ),
+      )
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const defaultMaxTokens = useMemo(() => {
+    if (selectedModel === "GPT-4 Turbo") return 4096
+    return 4096
+  }, [selectedModel])
+
+  const inputTokens = useMemo(() => {
+    if (!inputValue) return 0
+    if (selectedModel === "GPT-4 Turbo") return encodeCl100k(inputValue).length
+    return encodeCl100k(inputValue).length
+  }, [inputValue, selectedModel])
+
+  const maxTokensDisplay = maxTokensEnabled ? maxTokens : defaultMaxTokens
 
   const handleSend = async () => {
     if (!inputValue.trim() && attachments.length === 0) return
@@ -131,6 +404,11 @@ export function MultimodalChat() {
       ),
     )
 
+    const attCountForGrowth = attachments.length
+    setGrowthSources((s) => ({ ...s, user: s.user + 1, manual: s.manual + attCountForGrowth }))
+    pushGrowthEvent("user", 1)
+    if (attCountForGrowth > 0) pushGrowthEvent("manual", attCountForGrowth)
+
     const currentInput = inputValue
     setInputValue("")
     setAttachments([])
@@ -148,6 +426,7 @@ export function MultimodalChat() {
           attachments: attachments.map((a) => ({ type: a.type, name: a.name })),
           stream: streamEnabled,
           maxTokens: maxTokensEnabled ? maxTokens : undefined,
+          chainLength,
         }),
       })
       const questionData = await questionResponse.json()
@@ -176,64 +455,71 @@ export function MultimodalChat() {
           query: currentInput,
           retrievedDocs: retrieveData.data.results,
           conversationHistory: messages.slice(-5),
+          chainLength,
         }),
       })
       const generateData = await generateResponse.json()
       console.log("[v0] 答案生成响应:", generateData)
 
-      // 4. 添加AI回复消息
+      const assistantMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        role: "assistant",
+        content: streamEnabled ? "" : generateData.data.answer,
+        metadata: {
+          questionId: questionData.data.questionId,
+          retrievalTime: retrieveData.data.retrievalTime,
+          generationTime: generateData.data.generationTime,
+          confidence: generateData.data.confidence,
+          sources: generateData.data.sources,
+          thinking: generateData.data.thinking,
+        },
+      }
+
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv.id === currentConversationId
+            ? {
+                ...conv,
+                messages: [...conv.messages, assistantMessage],
+                updatedAt: new Date(),
+              }
+            : conv,
+        ),
+      )
+
+      setGrowthSources((s) => ({ ...s, auto: s.auto + 1 }))
+      pushGrowthEvent("auto", 1)
+
       if (streamEnabled) {
-        // 流式：先插入占位，后续逐字填充
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: "", // 初始为空
-          metadata: {
-            questionId: questionData.data.questionId,
-            retrievalTime: retrieveData.data.retrievalTime,
-            generationTime: generateData.data.generationTime,
-            confidence: generateData.data.confidence,
-            sources: generateData.data.sources,
-          },
+        const full = generateData.data.answer as string
+        let i = 0
+        const step = 8
+        if (streamIntervalRef.current) {
+          clearInterval(streamIntervalRef.current)
         }
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === currentConversationId
-              ? {
-                  ...conv,
-                  messages: [...conv.messages, assistantMessage],
-                  updatedAt: new Date(),
-                }
-              : conv,
-          ),
-        )
-        // 启动流式读取
-        await startStreaming(questionData.data.questionId)
-      } else {
-        // 非流式：直接填充完整内容
-        const assistantMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          role: "assistant",
-          content: generateData.data.answer,
-          metadata: {
-            questionId: questionData.data.questionId,
-            retrievalTime: retrieveData.data.retrievalTime,
-            generationTime: generateData.data.generationTime,
-            confidence: generateData.data.confidence,
-            sources: generateData.data.sources,
-          },
-        }
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === currentConversationId
-              ? {
-                  ...conv,
-                  messages: [...conv.messages, assistantMessage],
-                  updatedAt: new Date(),
-                }
-              : conv,
-          ),
-        )
+        streamIntervalRef.current = setInterval(() => {
+          i += step
+          const slice = full.slice(0, i)
+          setConversations((prev) =>
+            prev.map((conv) =>
+              conv.id === currentConversationId
+                ? {
+                    ...conv,
+                    messages: conv.messages.map((m) =>
+                      m.id === assistantMessage.id ? { ...m, content: slice } : m,
+                    ),
+                    updatedAt: new Date(),
+                  }
+                : conv,
+            ),
+          )
+          if (i >= full.length) {
+            if (streamIntervalRef.current) {
+              clearInterval(streamIntervalRef.current)
+              streamIntervalRef.current = null
+            }
+          }
+        }, 30)
       }
     } catch (error) {
       console.error("[v0] API 调用失败:", error)
@@ -278,7 +564,7 @@ export function MultimodalChat() {
         {
           id: Date.now().toString(),
           role: "assistant",
-          content: "您好！我是多模态AI助手，可以处理文本、图片、文件和语音。请问有什么可以帮助您的？",
+          content: "您好！请问有什么可以帮助您的？",
         },
       ],
       createdAt: new Date(),
@@ -404,36 +690,6 @@ export function MultimodalChat() {
     return `${mins}:${secs.toString().padStart(2, "0")}`
   }
 
-  // 流式输出：逐字填充最后一条助手消息
-  const startStreaming = async (questionId: string) => {
-    setIsStreaming(true)
-    setStreamingContent("")
-    try {
-      const res = await fetch("/api/chat/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          questionId,
-          stream: true, // 关键标识
-        }),
-      })
-      if (!res.ok || !res.body) throw new Error("流式响应异常")
-      const reader = res.body.getReader()
-      const decoder = new TextDecoder()
-      let done = false
-      while (!done) {
-        const { value, done: doneReading } = await reader.read()
-        done = doneReading
-        const chunk = decoder.decode(value, { stream: true })
-        setStreamingContent((prev) => prev + chunk)
-      }
-    } catch (err) {
-      console.error("[v0] 流式读取失败", err)
-    } finally {
-      setIsStreaming(false)
-    }
-  }
-
   return (
     <div className="flex h-screen max-h-screen bg-background overflow-hidden">
       {/* 左侧导航栏 */}
@@ -442,10 +698,6 @@ export function MultimodalChat() {
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-md">
               <Sparkles className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <div>
-              <h1 className="font-semibold text-lg text-sidebar-foreground">多模态AI</h1>
-              <p className="text-xs text-muted-foreground">智能对话助手</p>
             </div>
           </div>
           <Button
@@ -458,7 +710,7 @@ export function MultimodalChat() {
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 p-4">
+        <ScrollArea className="flex-1 min-h-0 p-4">
           <div className="space-y-2">
             {conversations
               .slice()
@@ -539,38 +791,84 @@ export function MultimodalChat() {
             <Settings className="w-4 h-4" />
             <span className="text-sm font-medium">设置</span>
           </button>
+          <button
+            onClick={() => setActiveView("dashboard")}
+            className={cn(
+              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sidebar-foreground",
+              activeView === "dashboard" ? "bg-primary text-primary-foreground shadow-md" : "hover:bg-sidebar-accent",
+            )}
+          >
+            <BarChart2 className="w-4 h-4" />
+            <span className="text-sm font-medium">看板</span>
+          </button>
         </div>
       </aside>
 
       {/* 主内容区域 */}
-      <main className="flex-1 flex flex-col min-w-0">
+      <main className="flex-1 flex flex-col min-w-0 min-h-0">
         {activeView === "chat" ? (
           <>
             {/* 聊天消息区域 */}
-            <ScrollArea className="flex-1 px-6 py-8">
-              <div className="max-w-4xl mx-auto space-y-8">
+            <ScrollArea className="flex-1 h-full min-h-0 overflow-y-auto px-6 py-8">
+              <div className="max-w-4xl mx-auto space-y-8 pb-28">
                 {messages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "flex gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500",
-                      message.role === "user" ? "justify-end" : "justify-start",
-                    )}
-                  >
-                    {message.role === "assistant" && (
-                      <Avatar className="w-9 h-9 border-2 border-primary/20 shadow-sm">
-                        <AvatarFallback className="bg-gradient-to-br from-primary to-accent text-primary-foreground text-sm font-medium">
-                          AI
+                  message.role === "user" ? (
+                    <div
+                      key={message.id}
+                      className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500"
+                    >
+                      <Avatar className="w-8 h-8 border-2 border-secondary shadow-sm">
+                        <AvatarFallback className="bg-secondary text-secondary-foreground text-xs font-medium">
+                          我
                         </AvatarFallback>
                       </Avatar>
-                    )}
+                      <div className="space-y-2 max-w-[75%]">
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="space-y-2">
+                            {message.attachments.map((attachment, idx) => (
+                              <div key={idx}>
+                                {attachment.type === "image" ? (
+                                  <div className="rounded-lg overflow-hidden border border-border/50">
+                                    <img
+                                      src={attachment.url || "/placeholder.svg"}
+                                      alt={attachment.name}
+                                      className="max-w-full h-auto max-h-64 object-cover"
+                                    />
+                                    <div className="flex items-center gap-2 p-2 text-xs bg-muted/50">
+                                      <ImageIcon className="w-3.5 h-3.5" />
+                                      <span className="truncate">{attachment.name}</span>
+                                    </div>
+                                  </div>
+                                ) : attachment.type === "audio" ? (
+                                  <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/50">
+                                    <audio controls className="w-full h-10">
+                                      <source src={attachment.url} type="audio/webm" />
+                                      您的浏览器不支持音频播放
+                                    </audio>
+                                    <div className="flex items-center gap-2 p-2 text-xs border-t border-border/30">
+                                      <Mic className="w-3.5 h-3.5" />
+                                      <span className="truncate">{attachment.name}</span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50">
+                                    <Paperclip className="w-4 h-4" />
+                                    <span className="text-sm truncate">{attachment.name}</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        <div className="text-base leading-relaxed whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
                     <div
-                      className={cn(
-                        "rounded-2xl px-5 py-3.5 max-w-[75%] shadow-sm",
-                        message.role === "user"
-                          ? "bg-primary text-primary-foreground"
-                          : "bg-card border border-border text-card-foreground",
-                      )}
+                      key={message.id}
+                      className="animate-in fade-in slide-in-from-bottom-4 duration-500"
                     >
                       {message.attachments && message.attachments.length > 0 && (
                         <div className="mb-3 space-y-2">
@@ -583,39 +881,24 @@ export function MultimodalChat() {
                                     alt={attachment.name}
                                     className="max-w-full h-auto max-h-64 object-cover"
                                   />
-                                  <div
-                                    className={cn(
-                                      "flex items-center gap-2 p-2 text-xs",
-                                      message.role === "user" ? "bg-primary-foreground/15" : "bg-muted/50",
-                                    )}
-                                  >
+                                  <div className="flex items-center gap-2 p-2 text-xs bg-muted/50">
                                     <ImageIcon className="w-3.5 h-3.5" />
                                     <span className="truncate">{attachment.name}</span>
                                   </div>
                                 </div>
                               ) : attachment.type === "audio" ? (
-                                <div
-                                  className={cn(
-                                    "rounded-lg overflow-hidden border border-border/50",
-                                    message.role === "user" ? "bg-primary-foreground/15" : "bg-muted/50",
-                                  )}
-                                >
+                                <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/50">
                                   <audio controls className="w-full h-10">
                                     <source src={attachment.url} type="audio/webm" />
                                     您的浏览器不支持音频播放
                                   </audio>
-                                  <div className="flex items-center gap-2 p-2 text-xs border-t border-border/30">
+                                  <div className="flex items中心 gap-2 p-2 text-xs border-t border-border/30">
                                     <Mic className="w-3.5 h-3.5" />
                                     <span className="truncate">{attachment.name}</span>
                                   </div>
                                 </div>
                               ) : (
-                                <div
-                                  className={cn(
-                                    "flex items-center gap-2 p-2.5 rounded-lg",
-                                    message.role === "user" ? "bg-primary-foreground/15" : "bg-muted/50",
-                                  )}
-                                >
+                                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50">
                                   <Paperclip className="w-4 h-4" />
                                   <span className="text-sm truncate">{attachment.name}</span>
                                 </div>
@@ -624,61 +907,84 @@ export function MultimodalChat() {
                           ))}
                         </div>
                       )}
-                      <p className="text-sm leading-relaxed text-pretty whitespace-pre-wrap">
-                        {message.role === "assistant" &&
-                        idx === messages.length - 1 &&
-                        isStreaming
-                          ? streamingContent
-                          : message.content}
-                      </p>
+                      <div className="text-base leading-relaxed whitespace-pre-wrap">
+                        {message.content}
+                      </div>
                       {message.metadata && message.role === "assistant" && (
-                        <div className="mt-3 pt-3 border-t border-border/30 text-xs text-muted-foreground space-y-1">
-                          {message.metadata.confidence && (
-                            <div>置信度: {(message.metadata.confidence * 100).toFixed(0)}%</div>
-                          )}
-                          {message.metadata.retrievalTime && (
-                            <div>检索耗时: {message.metadata.retrievalTime.toFixed(2)}s</div>
-                          )}
-                          {message.metadata.generationTime && (
-                            <div>生成耗时: {message.metadata.generationTime.toFixed(2)}s</div>
-                          )}
-                          {message.metadata.sources && message.metadata.sources.length > 0 && (
-                            <div>来源: {message.metadata.sources.join(", ")}</div>
-                          )}
+                        <Collapsible>
+                          <div className="mt-3 flex items-center gap-2">
+                            <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center">
+                              <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
+                            </CollapsibleTrigger>
+                            <button onClick={() => copyAssistantToClipboard(message.content)} className="text-muted-foreground hover:text-foreground" aria-label="粘贴" title="粘贴">
+                              <ClipboardPaste className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => regenerateAnswer(message.id)} className="text-muted-foreground hover:text-foreground" aria-label="重新生成" title="重新生成">
+                              <RotateCcw className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleFeedback(message.id, "up")} className={cn("text-muted-foreground hover:text-foreground", feedbacks[message.id] === "up" && "text-primary")} aria-label="赞" title="赞">
+                              <ThumbsUp className="w-4 h-4" />
+                            </button>
+                            <button onClick={() => handleFeedback(message.id, "down")} className={cn("text-muted-foreground hover:text-foreground", feedbacks[message.id] === "down" && "text-destructive")} aria-label="踩" title="踩">
+                              <ThumbsDown className="w-4 h-4" />
+                            </button>
+                          </div>
+                          <CollapsibleContent>
+                            <div className="pt-3 border-t border-border/30 text-xs text-muted-foreground space-y-1">
+                              {message.metadata.confidence && (
+                                <div>置信度: {(message.metadata.confidence * 100).toFixed(0)}%</div>
+                              )}
+                              {message.metadata.retrievalTime && (
+                                <div>检索耗时: {message.metadata.retrievalTime.toFixed(2)}s</div>
+                              )}
+                              {message.metadata.generationTime && (
+                                <div>生成耗时: {message.metadata.generationTime.toFixed(2)}s</div>
+                              )}
+                              {message.metadata.sources && message.metadata.sources.length > 0 && (
+                                <div>来源: {message.metadata.sources.join(", ")}</div>
+                              )}
+                              {message.metadata.thinking && message.metadata.thinking.length > 0 && (
+                                <div className="space-y-1">
+                                  <div>思考过程:</div>
+                                  {message.metadata.thinking.map((t, i) => (
+                                    <div key={i}>{t}</div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          </CollapsibleContent>
+                        </Collapsible>
+                      )}
+                      {message.role === "assistant" && !isDefaultGreeting(message.content) && (
+                        <div className="mt-2 text-[11px] text-muted-foreground">
+                          tokens：
+                          {selectedModel === "GPT-4 Turbo"
+                            ? encodeCl100k(message.content).length
+                            : encodeCl100k(message.content).length}
+                          /{maxTokensDisplay}
                         </div>
                       )}
                     </div>
-                    {message.role === "user" && (
-                      <Avatar className="w-9 h-9 border-2 border-secondary shadow-sm">
-                        <AvatarFallback className="bg-secondary text-secondary-foreground text-sm font-medium">
-                          我
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                  </div>
+                  )
                 ))}
-                {(isLoading || isStreaming) && (
-                  <div className="flex gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <Avatar className="w-9 h-9 border-2 border-primary/20 shadow-sm">
-                      <AvatarFallback className="bg-gradient-to-br from-primary to-accent text-primary-foreground text-sm font-medium">
-                        AI
-                      </AvatarFallback>
-                    </Avatar>
+                {isLoading && (
+                  <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <div className="rounded-2xl px-5 py-3.5 bg-card border border-border">
                       <div className="flex items-center gap-2">
                         <div className="w-2 h-2 rounded-full bg-primary animate-bounce" />
                         <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:0.2s]" />
                         <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:0.4s]" />
-                        <span className="text-sm text-muted-foreground ml-2">{isStreaming ? "AI正在输出..." : "AI正在思考..."}</span>
+                        <span className="text-sm text-muted-foreground ml-2">AI正在思考...</span>
                       </div>
                     </div>
                   </div>
                 )}
+                <div ref={messagesEndRef} className="mb-16" />
               </div>
             </ScrollArea>
 
             {/* 输入区域 */}
-            <div className="border-t border-border bg-card/50 backdrop-blur-sm">
+            <div className="border-t border-border bg-card/50 backdrop-blur-sm sticky bottom-0 z-10">
               <div className="max-w-4xl mx-auto p-6">
                 {isRecording && (
                   <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-destructive/10 border border-destructive/20 rounded-xl animate-in fade-in slide-in-from-bottom-2">
@@ -730,6 +1036,7 @@ export function MultimodalChat() {
                 <div className="flex items-end gap-3">
                   <div className="flex-1 relative">
                     <Input
+                      ref={chatInputRef}
                       value={inputValue}
                       onChange={(e) => setInputValue(e.target.value)}
                       onKeyDown={(e) => {
@@ -738,9 +1045,9 @@ export function MultimodalChat() {
                           handleSend()
                         }
                       }}
-                      placeholder={isStreaming ? "AI正在输出中，请稍候..." : "输入消息或添加文件、图片、录音..."}
+                      placeholder="输入消息或添加文件、图片、录音..."
                       className="pr-36 min-h-[52px] resize-none bg-background border-border shadow-sm rounded-xl text-sm"
-                      disabled={isRecording || isLoading || isStreaming}
+                      disabled={isRecording || isLoading}
                     />
                     <div className="absolute right-2 bottom-2 flex items-center gap-1">
                       <Button
@@ -748,7 +1055,7 @@ export function MultimodalChat() {
                         variant="ghost"
                         className="h-9 w-9 hover:bg-accent"
                         onClick={() => handleFileSelect("file")}
-                        disabled={isRecording || isLoading || isStreaming}
+                        disabled={isRecording || isLoading}
                       >
                         <Paperclip className="w-4 h-4" />
                       </Button>
@@ -757,7 +1064,7 @@ export function MultimodalChat() {
                         variant="ghost"
                         className="h-9 w-9 hover:bg-accent"
                         onClick={() => handleFileSelect("image")}
-                        disabled={isRecording || isLoading || isStreaming}
+                        disabled={isRecording || isLoading}
                       >
                         <ImageIcon className="w-4 h-4" />
                       </Button>
@@ -771,7 +1078,7 @@ export function MultimodalChat() {
                             : "hover:bg-accent",
                         )}
                         onClick={toggleRecording}
-                        disabled={isLoading || isStreaming}
+                        disabled={isLoading}
                       >
                         <Mic className="w-4 h-4" />
                       </Button>
@@ -781,14 +1088,14 @@ export function MultimodalChat() {
                     onClick={handleSend}
                     size="icon"
                     className="h-[52px] w-[52px] flex-shrink-0 rounded-xl shadow-md hover:shadow-lg transition-shadow"
-                    disabled={isRecording || isLoading || isStreaming}
+                    disabled={isRecording || isLoading}
                   >
                     <Send className="w-5 h-5" />
                   </Button>
                 </div>
-                <p className="text-xs text-muted-foreground mt-3 text-center">
-                  支持文本、图片、文件和语音等多种输入方式
-                </p>
+                <div className="mt-3 flex justify-end">
+                  <p className="text-xs text-muted-foreground">tokens：{inputTokens}/{maxTokensDisplay}</p>
+                </div>
               </div>
             </div>
 
@@ -802,7 +1109,7 @@ export function MultimodalChat() {
               onChange={(e) => handleFileChange(e, "image")}
             />
           </>
-        ) : (
+        ) : activeView === "settings" ? (
           <div className="flex-1 px-6 py-8 overflow-y-auto">
             <div className="max-w-3xl mx-auto">
               <h2 className="text-3xl font-semibold mb-8 text-balance">设置</h2>
@@ -814,27 +1121,47 @@ export function MultimodalChat() {
                   </h3>
                   <div className="space-y-5">
                     <div>
-                      <label className="text-sm font-medium text-foreground mb-2 block">AI模型</label>
-                      <select className="w-full px-4 py-2.5 bg-background border border-border rounded-xl text-sm focus:ring-2 focus:ring-primary/20 transition-shadow">
-                        <option>GPT-4 Turbo</option>
-                        <option>Claude 3 Opus</option>
-                        <option>Gemini Pro</option>
-                      </select>
+                      <label className="text-sm font-medium text-foreground mb-2 block">思维链长度</label>
+                      <RadioGroup
+                        value={chainLevel}
+                        onValueChange={(v) => {
+                          setChainLevel(v)
+                          setChainLength(v === "basic" ? 2 : v === "medium" ? 6 : 10)
+                        }}
+                        className="grid grid-cols-3 gap-2"
+                      >
+                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                          <RadioGroupItem value="basic" />
+                          <span className="text-sm">初级</span>
+                        </label>
+                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                          <RadioGroupItem value="medium" />
+                          <span className="text-sm">中级</span>
+                        </label>
+                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                          <RadioGroupItem value="advanced" />
+                          <span className="text-sm">高级</span>
+                        </label>
+                      </RadioGroup>
+                      <div className="text-xs text-muted-foreground mt-2">
+                        {chainLevel === "basic" && "0–2步"}
+                        {chainLevel === "medium" && "4–6步"}
+                        {chainLevel === "advanced" && "10+步"}
+                      </div>
                     </div>
                     <div>
-                      <label className="text-sm font-medium text-foreground mb-2 block">温度</label>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.1"
-                        defaultValue="0.7"
-                        className="w-full accent-primary"
-                      />
-                      <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                        <span>精确</span>
-                        <span>创造</span>
+                      <div className="flex items-center justify-between mb-2">
+                        <label className="text-sm font-medium text-foreground">温度</label>
+                        <span className="text-xs text-muted-foreground">{temperature.toFixed(1)}</span>
                       </div>
+                      <Slider
+                        min={0}
+                        max={1}
+                        step={0.1}
+                        value={[temperature]}
+                        onValueChange={(vals) => setTemperature(vals[0])}
+                        className="w-full"
+                      />
                     </div>
                     <div className="space-y-4">
                       <div className="flex items-center justify-between">
@@ -871,6 +1198,89 @@ export function MultimodalChat() {
                 </div>
 
 
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 px-6 py-8 overflow-y-auto">
+            <div className="max-w-4xl mx-auto">
+              <h2 className="text-3xl font-semibold mb-8 text-balance">看板</h2>
+              <div className="mt-6 bg-card border border-border rounded-2xl p-6">
+                <div className="text-sm font-medium mb-3">知识成长来源占比</div>
+                {totalGrowth === 0 ? (
+                  <div className="text-xs text-muted-foreground">暂无数据</div>
+                ) : (
+                  <div className="w-full h-64">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <defs>
+                          {growthData.map((d) => (
+                            <linearGradient id={`grad-${d.key}`} key={d.key} x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor={lighten(d.color, 0.1)} />
+                              <stop offset="100%" stopColor={d.color} />
+                            </linearGradient>
+                          ))}
+                        </defs>
+                        <Pie
+                          dataKey="value"
+                          data={growthData}
+                          outerRadius={90}
+                          label
+                          onMouseEnter={(_, idx) => setActiveSlice(idx)}
+                          onMouseLeave={() => setActiveSlice(null)}
+                        >
+                          {growthData.map((d, idx) => (
+                            <Cell key={d.key} fill={activeSlice === idx ? `url(#grad-${d.key})` : d.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip content={<GrowthTooltip />} />
+                        <Legend />
+                      </PieChart>
+                    </ResponsiveContainer>
+                  </div>
+                )}
+              </div>
+              <div className="mt-6 bg-card border border-border rounded-2xl p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm font-medium">交互效率</div>
+                  <Button onClick={saveEfficiencyBaseline} size="sm" className="rounded-xl">设为对比基线</Button>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                  <div className="bg-muted rounded-xl p-4">
+                    <div className="text-xs text-muted-foreground">当前平均检索耗时</div>
+                    <div className="text-xl font-semibold mt-1">{analytics.avgRetrieval.toFixed(2)}s</div>
+                  </div>
+                  <div className="bg-muted rounded-xl p-4">
+                    <div className="text-xs text-muted-foreground">当前平均生成耗时</div>
+                    <div className="text-xl font-semibold mt-1">{analytics.avgGeneration.toFixed(2)}s</div>
+                  </div>
+                  <div className="bg-muted rounded-xl p-4">
+                    <div className="text-xs text-muted-foreground">基线时间</div>
+                    <div className="text-sm mt-1">{effBaseline ? new Date(effBaseline.timestamp).toLocaleString("zh-CN") : "未设置"}</div>
+                  </div>
+                </div>
+                {effBaseline && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="bg-muted rounded-xl p-4">
+                      <div className="text-xs text-muted-foreground">检索耗时提升对比</div>
+                      <div className="text-xl font-semibold mt-1">
+                        {effBaseline.avgRetrieval > 0
+                          ? `${(((effBaseline.avgRetrieval - analytics.avgRetrieval) / effBaseline.avgRetrieval) * 100).toFixed(0)}%`
+                          : "-"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">相对上一版本</div>
+                    </div>
+                    <div className="bg-muted rounded-xl p-4">
+                      <div className="text-xs text-muted-foreground">生成耗时提升对比</div>
+                      <div className="text-xl font-semibold mt-1">
+                        {effBaseline.avgGeneration > 0
+                          ? `${(((effBaseline.avgGeneration - analytics.avgGeneration) / effBaseline.avgGeneration) * 100).toFixed(0)}%`
+                          : "-"}
+                      </div>
+                      <div className="text-xs text-muted-foreground mt-1">相对上一版本</div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
