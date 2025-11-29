@@ -10,11 +10,13 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Slider } from "@/components/ui/slider"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible"
-import { MessageSquare, Settings, Paperclip, ImageIcon, Mic, Send, Plus, Sparkles, X, Trash2, ChevronDown, ClipboardPaste, RotateCcw, ThumbsUp, ThumbsDown, BarChart2, Activity } from "lucide-react"
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from "recharts"
+import { MessageSquare, Settings, Paperclip, ImageIcon, Mic, Send, Plus, Sparkles, X, RotateCcw, ThumbsUp, ThumbsDown, BarChart2, Activity, User, Home, Hash, Globe, Hammer, ChevronRight } from "lucide-react"
+import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid } from "recharts"
+import { HistoryItem } from "@/components/ui/history-item"
 import { Switch } from "@/components/ui/switch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { cn } from "@/lib/utils"
+import { HaloButton } from "@/components/ui/halo-button"
 
 type Message = {
   id: string
@@ -45,6 +47,7 @@ type Conversation = {
 
 export function MultimodalChat() {
   const [activeView, setActiveView] = useState<"chat" | "settings" | "dashboard">("chat")
+  const [sidebarTab, setSidebarTab] = useState<"topics" | "settings" | "dashboard">("topics")
 
   const [conversations, setConversations] = useState<Conversation[]>([
     {
@@ -81,47 +84,38 @@ export function MultimodalChat() {
   const [growthSources, setGrowthSources] = useState({ auto: 0, user: 0, manual: 0 })
   const [effBaseline, setEffBaseline] = useState<null | { avgRetrieval: number; avgGeneration: number; timestamp: string }>(null)
   const [activeSlice, setActiveSlice] = useState<number | null>(null)
+
+  const [selectedModel, setSelectedModel] = useState("Qwen3-8B")
+  const [temperature, setTemperature] = useState(0.7)
+  const [maxTokens, setMaxTokens] = useState(2048)
+  const [streamEnabled, setStreamEnabled] = useState(true)
+  const [maxTokensEnabled, setMaxTokensEnabled] = useState(false)
+  const [chainLevel, setChainLevel] = useState("medium") // basic, medium, advanced
+  const [chainLength, setChainLength] = useState(6)
+
   const [growthEvents, setGrowthEvents] = useState<Array<{ type: "auto" | "user" | "manual"; ts: number }>>([])
 
-  // 模型设置状态
-  const [streamEnabled, setStreamEnabled] = useState(true)
-  const [maxTokens, setMaxTokens] = useState(2048)
-  const [maxTokensEnabled, setMaxTokensEnabled] = useState(false)
-  const [selectedModel, setSelectedModel] = useState("GPT-4 Turbo")
-  const [temperature, setTemperature] = useState(0.7)
-  const [chainLength, setChainLength] = useState(2)
-  const [chainLevel, setChainLevel] = useState("basic")
-
+  const scrollRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const imageInputRef = useRef<HTMLInputElement>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const streamIntervalRef = useRef<NodeJS.Timeout | null>(null)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const chatInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" })
-  }, [messages])
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem("effBaseline")
-      if (raw) {
-        const parsed = JSON.parse(raw)
-        if (parsed && typeof parsed.avgRetrieval === "number" && typeof parsed.avgGeneration === "number") {
-          setEffBaseline(parsed)
-        }
-      }
-    } catch {}
-  }, [])
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+    }
+  }, [messages, isLoading]) //Added isLoading to auto scroll when generating
 
   useEffect(() => {
     try {
-      const raw = localStorage.getItem("growthEvents")
-      if (raw) {
-        const parsed = JSON.parse(raw)
+      const saved = localStorage.getItem("effBaseline")
+      if (saved) setEffBaseline(JSON.parse(saved))
+      const savedEvents = localStorage.getItem("growthEvents")
+      if (savedEvents) {
+        const parsed = JSON.parse(savedEvents)
         if (Array.isArray(parsed)) setGrowthEvents(parsed)
       }
     } catch {}
@@ -163,6 +157,29 @@ export function MultimodalChat() {
       sources,
     }
   }, [conversations, feedbacks])
+
+  const efficiencySeries = useMemo(() => {
+    const all = conversations.flatMap((c) => c.messages)
+    const assistants = all.filter((m) => m.role === "assistant" && !isDefaultGreeting(m.content))
+    const baseR = effBaseline?.avgRetrieval || 0
+    const baseG = effBaseline?.avgGeneration || 0
+    return assistants
+      .filter((m) => typeof m.metadata?.retrievalTime === "number" || typeof m.metadata?.generationTime === "number")
+      .map((m, i) => {
+        const rt = m.metadata?.retrievalTime || 0
+        const gt = m.metadata?.generationTime || 0
+        const rGain = baseR > 0 ? ((baseR - rt) / baseR) * 100 : null
+        const gGain = baseG > 0 ? ((baseG - gt) / baseG) * 100 : null
+        return {
+          ts: Number(m.id) || Date.now(),
+          index: i + 1,
+          retrievalGain: rGain,
+          generationGain: gGain,
+          retrievalTime: rt,
+          generationTime: gt,
+        }
+      })
+  }, [conversations, effBaseline])
 
   const copyAssistantToClipboard = async (text: string) => {
     try {
@@ -221,21 +238,6 @@ export function MultimodalChat() {
     [growthSources],
   )
   const totalGrowth = useMemo(() => growthData.reduce((s, d) => s + d.value, 0), [growthData])
-
-  const GrowthTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const p = payload[0]
-      const entry = p.payload
-      const percent = totalGrowth > 0 ? Math.round((entry.value / totalGrowth) * 100) : 0
-      const w = weeklyCounts[entry.key as "auto" | "user" | "manual"] || 0
-      return (
-        <div className="bg-popover text-popover-foreground border border-border rounded-lg p-2 text-xs">
-          {`${entry.name}占比 ${percent}%，本周新增 ${w} 条`}
-        </div>
-      )
-    }
-    return null
-  }
 
   const regenerateAnswer = async (assistantMessageId: string) => {
     const conv = conversations.find((c) => c.id === currentConversationId)
@@ -691,419 +693,246 @@ export function MultimodalChat() {
   }
 
   return (
-    <div className="flex h-screen max-h-screen bg-background overflow-hidden">
-      {/* 左侧导航栏 */}
-      <aside className="w-72 border-r border-border bg-sidebar flex flex-col shadow-sm">
-        <div className="p-5 border-b border-sidebar-border">
-          <div className="flex items-center gap-3 mb-5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-md">
-              <Sparkles className="w-5 h-5 text-primary-foreground" />
-            </div>
+    <div className="flex h-screen w-full bg-[#FDFDFD] text-zinc-800 font-sans selection:bg-primary/20">
+      {/* Sidebar */}
+      <aside className="w-[260px] flex-shrink-0 flex flex-col bg-[#FAFAFA] border-r border-zinc-100">
+        {/* Home / Search Bar */}
+        <div className="h-14 flex items-center px-4 border-b border-zinc-50/50">
+          <div className="flex-1 flex items-center gap-2 bg-white border border-zinc-200/60 rounded-xl px-3 py-1.5 shadow-sm hover:shadow transition-all cursor-text group">
+            <Home className="w-4 h-4 text-zinc-400 group-hover:text-zinc-600 transition-colors" />
+            <span className="text-sm text-zinc-500 font-medium">首页</span>
           </div>
-          <Button
-            onClick={createNewConversation}
-            className="w-full justify-start gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-sm"
-            size="sm"
-          >
-            <Plus className="w-4 h-4" />
-            新建对话
+          <Button variant="ghost" size="icon" onClick={createNewConversation} className="ml-2 h-8 w-8 rounded-full hover:bg-zinc-200/50 text-zinc-500">
+            <Plus className="w-5 h-5" />
           </Button>
         </div>
 
-        <ScrollArea className="flex-1 min-h-0 p-4">
-          <div className="space-y-2">
-            {conversations
-              .slice()
-              .sort((a, b) => {
-                const aNew = a.messages.every((m) => m.role !== "user")
-                const bNew = b.messages.every((m) => m.role !== "user")
-                if (a.id === currentConversationId && aNew) return -1
-                if (b.id === currentConversationId && bNew) return 1
-                return b.updatedAt.getTime() - a.updatedAt.getTime()
-              })
-              .map((conversation) => (
-                <div
-                  key={conversation.id}
-                  onClick={() => switchConversation(conversation.id)}
-                  className={cn(
-                    "px-4 py-3 rounded-xl cursor-pointer transition-all duration-200 group relative",
-                    currentConversationId === conversation.id
-                      ? "bg-primary/10 border border-primary/20 shadow-sm"
-                      : "hover:bg-sidebar-accent border border-transparent",
-                  )}
-                >
-                  <div className="flex items-start gap-2 mb-1">
-                    <MessageSquare
-                      className={cn(
-                        "w-4 h-4 mt-0.5 flex-shrink-0",
-                        currentConversationId === conversation.id ? "text-primary" : "text-muted-foreground",
-                      )}
-                    />
-                    <span
-                      className={cn(
-                        "text-sm font-medium flex-1 line-clamp-1",
-                        currentConversationId === conversation.id ? "text-foreground" : "text-sidebar-foreground",
-                      )}
-                    >
-                      {conversation.title}
-                    </span>
-                    <button
-                      onClick={(e) => deleteConversation(conversation.id, e)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-destructive" />
-                    </button>
-                  </div>
-                  <p className="text-xs text-muted-foreground line-clamp-2 pl-6">
-                    {conversation.messages[conversation.messages.length - 1]?.content || "暂无消息"}
-                  </p>
-                  <p className="text-xs text-muted-foreground/70 mt-1 pl-6">
-                    {conversation.updatedAt.toLocaleString("zh-CN", {
-                      month: "numeric",
-                      day: "numeric",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </p>
-                </div>
-              ))}
-          </div>
-        </ScrollArea>
-
-        <div className="p-4 border-t border-sidebar-border space-y-2">
+        {/* Tabs */}
+        <div className="flex items-center px-4 py-2 gap-6 border-b border-zinc-100/50">
           <button
-            onClick={() => setActiveView("chat")}
+            onClick={() => {
+              setSidebarTab("topics")
+              setActiveView("chat")
+            }}
             className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sidebar-foreground",
-              activeView === "chat" ? "bg-primary text-primary-foreground shadow-md" : "hover:bg-sidebar-accent",
+              "text-sm font-medium pb-2 border-b-2 transition-all",
+              sidebarTab === "topics" ? "text-zinc-900 border-[#00B894]" : "text-zinc-400 border-transparent hover:text-zinc-600"
             )}
           >
-            <MessageSquare className="w-4 h-4" />
-            <span className="text-sm font-medium">对话</span>
+            话题
           </button>
           <button
-            onClick={() => setActiveView("settings")}
+            onClick={() => {
+               setSidebarTab("dashboard")
+               setActiveView("dashboard")
+            }}
             className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sidebar-foreground",
-              activeView === "settings" ? "bg-primary text-primary-foreground shadow-md" : "hover:bg-sidebar-accent",
+              "text-sm font-medium pb-2 border-b-2 transition-all",
+              sidebarTab === "dashboard" ? "text-zinc-900 border-[#00B894]" : "text-zinc-400 border-transparent hover:text-zinc-600"
             )}
           >
-            <Settings className="w-4 h-4" />
-            <span className="text-sm font-medium">设置</span>
+            看板
           </button>
           <button
-            onClick={() => setActiveView("dashboard")}
+            onClick={() => {
+               setSidebarTab("settings")
+               setActiveView("settings")
+            }}
             className={cn(
-              "w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 text-sidebar-foreground",
-              activeView === "dashboard" ? "bg-primary text-primary-foreground shadow-md" : "hover:bg-sidebar-accent",
+              "text-sm font-medium pb-2 border-b-2 transition-all",
+              sidebarTab === "settings" ? "text-zinc-900 border-[#00B894]" : "text-zinc-400 border-transparent hover:text-zinc-600"
             )}
           >
-            <BarChart2 className="w-4 h-4" />
-            <span className="text-sm font-medium">看板</span>
+            设置
           </button>
         </div>
+
+        {/* Sidebar Content */}
+        <ScrollArea className="flex-1 px-3 py-4">
+
+          
+          {sidebarTab === "topics" && (
+             <div className="space-y-2">
+               <div className="mb-4 px-1">
+                 <HaloButton onClick={createNewConversation} icon={<Plus className="w-4 h-4" />}>
+                   新建对话
+                 </HaloButton>
+               </div>
+               {conversations
+                  .slice()
+                  .sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime())
+                  .map((c) => (
+                 <HistoryItem
+                    key={c.id}
+                    title={c.title}
+                    isActive={currentConversationId === c.id}
+                    onClick={() => {
+                      switchConversation(c.id)
+                      setActiveView("chat")
+                    }}
+                    onDelete={(e) => deleteConversation(c.id, e)}
+                    preview={c.messages[c.messages.length - 1]?.content || "暂无消息"}
+                    date={c.updatedAt.toLocaleString("zh-CN", { month: "numeric", day: "numeric" })}
+                 />
+               ))}
+             </div>
+          )}
+        </ScrollArea>
+        
+
       </aside>
 
-      {/* 主内容区域 */}
-      <main className="flex-1 flex flex-col min-w-0 min-h-0">
+      {/* Main Content */}
+      <main className="flex-1 flex flex-col min-w-0 bg-white relative overflow-hidden">
+        {/* Header */}
+        <header className="h-14 flex items-center justify-between px-6 border-b border-zinc-50 bg-white/80 backdrop-blur-sm z-10">
+
+           <div className="flex items-center gap-2">
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-zinc-600" onClick={() => {
+                setActiveView("dashboard")
+                setSidebarTab("dashboard")
+              }}><Activity className="w-4 h-4" /></Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8 text-zinc-400 hover:text-zinc-600" onClick={() => {
+                setActiveView("settings")
+                setSidebarTab("settings")
+              }}><Settings className="w-4 h-4" /></Button>
+           </div>
+        </header>
+
         {activeView === "chat" ? (
           <>
-            {/* 聊天消息区域 */}
-            <ScrollArea className="flex-1 h-full min-h-0 overflow-y-auto px-6 py-8">
-              <div className="max-w-4xl mx-auto space-y-8 pb-28">
-                {messages.map((message) => (
-                  message.role === "user" ? (
-                    <div
-                      key={message.id}
-                      className="flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    >
-                      <Avatar className="w-8 h-8 border-2 border-secondary shadow-sm">
-                        <AvatarFallback className="bg-secondary text-secondary-foreground text-xs font-medium">
-                          我
-                        </AvatarFallback>
-                      </Avatar>
-                      <div className="space-y-2 max-w-[75%]">
-                        {message.attachments && message.attachments.length > 0 && (
-                          <div className="space-y-2">
-                            {message.attachments.map((attachment, idx) => (
-                              <div key={idx}>
-                                {attachment.type === "image" ? (
-                                  <div className="rounded-lg overflow-hidden border border-border/50">
-                                    <img
-                                      src={attachment.url || "/placeholder.svg"}
-                                      alt={attachment.name}
-                                      className="max-w-full h-auto max-h-64 object-cover"
-                                    />
-                                    <div className="flex items-center gap-2 p-2 text-xs bg-muted/50">
-                                      <ImageIcon className="w-3.5 h-3.5" />
-                                      <span className="truncate">{attachment.name}</span>
-                                    </div>
-                                  </div>
-                                ) : attachment.type === "audio" ? (
-                                  <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/50">
-                                    <audio controls className="w-full h-10">
-                                      <source src={attachment.url} type="audio/webm" />
-                                      您的浏览器不支持音频播放
-                                    </audio>
-                                    <div className="flex items-center gap-2 p-2 text-xs border-t border-border/30">
-                                      <Mic className="w-3.5 h-3.5" />
-                                      <span className="truncate">{attachment.name}</span>
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50">
-                                    <Paperclip className="w-4 h-4" />
-                                    <span className="text-sm truncate">{attachment.name}</span>
-                                  </div>
-                                )}
+            <ScrollArea className="flex-1 px-8 py-6" ref={scrollRef}>
+               <div className="max-w-3xl mx-auto space-y-10 pb-32">
+                  {messages.map((message) => (
+                    <div key={message.id} className="group">
+                       {message.role === "user" ? (
+                         <div className="flex justify-end">
+                           <div className="bg-zinc-100 text-zinc-800 px-5 py-3 rounded-2xl rounded-tr-sm max-w-[80%] text-base leading-7 shadow-sm">
+                             {message.content}
+                           </div>
+                         </div>
+                       ) : (
+                         <div className="flex gap-4">
+                            <div className="flex-1 space-y-4 overflow-hidden">
+                              {/* Message Content */}
+                              <div className="prose prose-zinc max-w-none text-zinc-700 leading-7">
+                                {message.content.split('\n').map((line, i) => (
+                                  <p key={i} className="mb-2">{line}</p>
+                                ))}
                               </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="text-base leading-relaxed whitespace-pre-wrap">
-                          {message.content}
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div
-                      key={message.id}
-                      className="animate-in fade-in slide-in-from-bottom-4 duration-500"
-                    >
-                      {message.attachments && message.attachments.length > 0 && (
-                        <div className="mb-3 space-y-2">
-                          {message.attachments.map((attachment, idx) => (
-                            <div key={idx}>
-                              {attachment.type === "image" ? (
-                                <div className="rounded-lg overflow-hidden border border-border/50">
-                                  <img
-                                    src={attachment.url || "/placeholder.svg"}
-                                    alt={attachment.name}
-                                    className="max-w-full h-auto max-h-64 object-cover"
-                                  />
-                                  <div className="flex items-center gap-2 p-2 text-xs bg-muted/50">
-                                    <ImageIcon className="w-3.5 h-3.5" />
-                                    <span className="truncate">{attachment.name}</span>
-                                  </div>
-                                </div>
-                              ) : attachment.type === "audio" ? (
-                                <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/50">
-                                  <audio controls className="w-full h-10">
-                                    <source src={attachment.url} type="audio/webm" />
-                                    您的浏览器不支持音频播放
-                                  </audio>
-                                  <div className="flex items中心 gap-2 p-2 text-xs border-t border-border/30">
-                                    <Mic className="w-3.5 h-3.5" />
-                                    <span className="truncate">{attachment.name}</span>
-                                  </div>
-                                </div>
-                              ) : (
-                                <div className="flex items-center gap-2 p-2.5 rounded-lg bg-muted/50">
-                                  <Paperclip className="w-4 h-4" />
-                                  <span className="text-sm truncate">{attachment.name}</span>
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      <div className="text-base leading-relaxed whitespace-pre-wrap">
-                        {message.content}
-                      </div>
-                      {message.metadata && message.role === "assistant" && (
-                        <Collapsible>
-                          <div className="mt-3 flex items-center gap-2">
-                            <CollapsibleTrigger className="text-xs text-muted-foreground hover:text-foreground flex items-center">
-                              <ChevronDown className="w-4 h-4 transition-transform data-[state=open]:rotate-180" />
-                            </CollapsibleTrigger>
-                            <button onClick={() => copyAssistantToClipboard(message.content)} className="text-muted-foreground hover:text-foreground" aria-label="粘贴" title="粘贴">
-                              <ClipboardPaste className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => regenerateAnswer(message.id)} className="text-muted-foreground hover:text-foreground" aria-label="重新生成" title="重新生成">
-                              <RotateCcw className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleFeedback(message.id, "up")} className={cn("text-muted-foreground hover:text-foreground", feedbacks[message.id] === "up" && "text-primary")} aria-label="赞" title="赞">
-                              <ThumbsUp className="w-4 h-4" />
-                            </button>
-                            <button onClick={() => handleFeedback(message.id, "down")} className={cn("text-muted-foreground hover:text-foreground", feedbacks[message.id] === "down" && "text-destructive")} aria-label="踩" title="踩">
-                              <ThumbsDown className="w-4 h-4" />
-                            </button>
-                          </div>
-                          <CollapsibleContent>
-                            <div className="pt-3 border-t border-border/30 text-xs text-muted-foreground space-y-1">
-                              {message.metadata.confidence && (
-                                <div>置信度: {(message.metadata.confidence * 100).toFixed(0)}%</div>
-                              )}
-                              {message.metadata.retrievalTime && (
-                                <div>检索耗时: {message.metadata.retrievalTime.toFixed(2)}s</div>
-                              )}
-                              {message.metadata.generationTime && (
-                                <div>生成耗时: {message.metadata.generationTime.toFixed(2)}s</div>
-                              )}
-                              {message.metadata.sources && message.metadata.sources.length > 0 && (
-                                <div>来源: {message.metadata.sources.join(", ")}</div>
-                              )}
-                              {message.metadata.thinking && message.metadata.thinking.length > 0 && (
-                                <div className="space-y-1">
-                                  <div>思考过程:</div>
-                                  {message.metadata.thinking.map((t, i) => (
-                                    <div key={i}>{t}</div>
+
+                              {/* Attachments Display */}
+                              {message.attachments && message.attachments.length > 0 && (
+                                <div className="flex flex-wrap gap-2">
+                                  {message.attachments.map((att, idx) => (
+                                     <div key={idx} className="flex items-center gap-2 bg-zinc-50 border border-zinc-100 rounded-lg px-3 py-2 text-sm text-zinc-600">
+                                        {att.type === 'image' ? <ImageIcon className="w-4 h-4" /> : att.type === 'audio' ? <Mic className="w-4 h-4" /> : <Paperclip className="w-4 h-4" />}
+                                        <span className="truncate max-w-[200px]">{att.name}</span>
+                                     </div>
                                   ))}
                                 </div>
                               )}
+                              
+                              {/* Metadata / Example Card */}
+                              {message.metadata && (
+                                 <div className="flex flex-col gap-2 mt-2">
+                                    <div className="flex flex-wrap gap-2">
+                                        {message.metadata.thinking && message.metadata.thinking.length > 0 && (
+                                            <div className="bg-blue-50 text-blue-700 text-xs px-2 py-1 rounded-md">
+                                                思考中...
+                                            </div>
+                                        )}
+                                        {message.metadata.retrievalTime && (
+                                            <div className="text-xs text-zinc-400">检索: {message.metadata.retrievalTime.toFixed(2)}s</div>
+                                        )}
+                                        {message.metadata.generationTime && (
+                                            <div className="text-xs text-zinc-400">生成: {message.metadata.generationTime.toFixed(2)}s</div>
+                                        )}
+                                    </div>
+                                    {/* If there are sources, show them */}
+                                    {message.metadata.sources && message.metadata.sources.length > 0 && (
+                                        <div className="text-xs text-zinc-500 bg-zinc-50 p-2 rounded-lg border border-zinc-100">
+                                            来源: {message.metadata.sources.join(", ")}
+                                        </div>
+                                    )}
+                                 </div>
+                              )}
                             </div>
-                          </CollapsibleContent>
-                        </Collapsible>
-                      )}
-                      {message.role === "assistant" && !isDefaultGreeting(message.content) && (
-                        <div className="mt-2 text-[11px] text-muted-foreground">
-                          tokens：
-                          {selectedModel === "GPT-4 Turbo"
-                            ? encodeCl100k(message.content).length
-                            : encodeCl100k(message.content).length}
-                          /{maxTokensDisplay}
-                        </div>
-                      )}
+                         </div>
+                       )}
                     </div>
-                  )
-                ))}
-                {isLoading && (
-                  <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <div className="rounded-2xl px-5 py-3.5 bg-card border border-border">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce" />
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:0.2s]" />
-                        <div className="w-2 h-2 rounded-full bg-primary animate-bounce [animation-delay:0.4s]" />
-                        <span className="text-sm text-muted-foreground ml-2">AI正在思考...</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-                <div ref={messagesEndRef} className="mb-16" />
-              </div>
+                  ))}
+               </div>
             </ScrollArea>
 
-            {/* 输入区域 */}
-            <div className="border-t border-border bg-card/50 backdrop-blur-sm sticky bottom-0 z-10">
-              <div className="max-w-4xl mx-auto p-6">
-                {isRecording && (
-                  <div className="mb-4 flex items-center gap-3 px-4 py-3 bg-destructive/10 border border-destructive/20 rounded-xl animate-in fade-in slide-in-from-bottom-2">
-                    <div className="w-3 h-3 rounded-full bg-destructive animate-pulse" />
-                    <span className="text-sm font-medium text-destructive">正在录音...</span>
-                    <span className="text-sm text-muted-foreground ml-auto">{formatRecordingTime(recordingTime)}</span>
-                  </div>
-                )}
+            {/* Input Area - Floating Bottom */}
+            <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-white via-white to-transparent z-20">
+              <div className="max-w-3xl mx-auto">
+                <div className="bg-white rounded-[2rem] border border-zinc-200 shadow-[0_8px_40px_-12px_rgba(0,0,0,0.1)] overflow-hidden transition-all focus-within:ring-1 focus-within:ring-primary/20 focus-within:border-primary/50">
 
-                {attachments.length > 0 && (
-                  <div className="mb-4 flex flex-wrap gap-2">
-                    {attachments.map((attachment, idx) => (
-                      <div
-                        key={idx}
-                        className="flex items-center gap-2 px-3 py-2 bg-secondary/80 rounded-xl text-sm shadow-sm animate-in fade-in zoom-in-95 duration-200"
-                      >
-                        {attachment.type === "image" ? (
-                          <>
-                            <div className="w-8 h-8 rounded overflow-hidden border border-border/50">
-                              <img
-                                src={attachment.url || "/placeholder.svg"}
-                                alt={attachment.name}
-                                className="w-full h-full object-cover"
-                              />
-                            </div>
-                            <span className="truncate max-w-[120px]">{attachment.name}</span>
-                          </>
-                        ) : attachment.type === "audio" ? (
-                          <>
-                            <Mic className="w-4 h-4 text-primary" />
-                            <span className="truncate max-w-[150px]">{attachment.name}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Paperclip className="w-4 h-4 text-primary" />
-                            <span className="truncate max-w-[150px]">{attachment.name}</span>
-                          </>
-                        )}
-                        <button
-                          onClick={() => removeAttachment(idx)}
-                          className="hover:bg-background rounded-lg p-1 transition-colors"
+
+                  {/* Textarea */}
+                  <div className="px-4 py-2">
+                    <Input
+                       className="border-0 shadow-none focus-visible:ring-0 p-0 text-base min-h-[40px] resize-none bg-transparent placeholder:text-zinc-300"
+                       placeholder="在这里输入消息，按 Enter 发送..."
+                       value={inputValue}
+                       onChange={(e) => setInputValue(e.target.value)}
+                       onKeyDown={(e) => {
+                         if (e.key === "Enter" && !e.shiftKey) {
+                           e.preventDefault()
+                           handleSend()
+                         }
+                       }}
+                    />
+                  </div>
+
+                  {/* Bottom Toolbar */}
+                  <div className="flex items-center justify-between px-3 py-2 bg-white">
+                     <div className="flex items-center gap-1">
+                        <Button variant="ghost" size="icon" className="h-9 w-9 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full" onClick={() => handleFileSelect('file')}><Plus className="w-5 h-5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-9 w-9 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full" onClick={() => handleFileSelect('image')}><ImageIcon className="w-5 h-5" /></Button>
+                        <Button variant="ghost" size="icon" className={cn("h-9 w-9 rounded-full", isRecording ? "text-red-500 bg-red-50" : "text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100")} onClick={toggleRecording}><Mic className="w-5 h-5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-9 w-9 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full"><Globe className="w-5 h-5" /></Button>
+                        <Button variant="ghost" size="icon" className="h-9 w-9 text-zinc-400 hover:text-zinc-600 hover:bg-zinc-100 rounded-full"><Hammer className="w-5 h-5" /></Button>
+                     </div>
+                     <div className="flex items-center gap-4">
+                        <div className="text-[10px] text-zinc-300 font-mono">= {chainLength}/10 ↑ {conversations.length}</div>
+                        <Button 
+                          onClick={handleSend} 
+                          disabled={isLoading || (!inputValue.trim() && attachments.length === 0)}
+                          className={cn("rounded-full w-9 h-9 p-0 flex items-center justify-center transition-all", (inputValue.trim() || attachments.length > 0) ? "bg-black text-white shadow-md hover:bg-zinc-800" : "bg-zinc-100 text-zinc-300")}
                         >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                           {isLoading ? <RotateCcw className="w-5 h-5 animate-spin" /> : <ChevronRight className="w-5 h-5" />}
+                        </Button>
+                     </div>
+                  </div>
+                </div>
+                
+                {/* Attachments Preview */}
+                {attachments.length > 0 && (
+                  <div className="mt-2 flex gap-2 overflow-x-auto pb-2">
+                    {attachments.map((att, i) => (
+                      <div key={i} className="relative bg-white border border-zinc-200 rounded-lg p-2 flex items-center gap-2 shadow-sm min-w-[120px]">
+                         <span className="text-xs truncate max-w-[100px]">{att.name}</span>
+                         <button onClick={() => removeAttachment(i)} className="absolute -top-1 -right-1 bg-red-500 text-white rounded-full p-0.5"><X className="w-3 h-3" /></button>
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="flex items-end gap-3">
-                  <div className="flex-1 relative">
-                    <Input
-                      ref={chatInputRef}
-                      value={inputValue}
-                      onChange={(e) => setInputValue(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && !e.shiftKey) {
-                          e.preventDefault()
-                          handleSend()
-                        }
-                      }}
-                      placeholder="输入消息或添加文件、图片、录音..."
-                      className="pr-36 min-h-[52px] resize-none bg-background border-border shadow-sm rounded-xl text-sm"
-                      disabled={isRecording || isLoading}
-                    />
-                    <div className="absolute right-2 bottom-2 flex items-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-9 w-9 hover:bg-accent"
-                        onClick={() => handleFileSelect("file")}
-                        disabled={isRecording || isLoading}
-                      >
-                        <Paperclip className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-9 w-9 hover:bg-accent"
-                        onClick={() => handleFileSelect("image")}
-                        disabled={isRecording || isLoading}
-                      >
-                        <ImageIcon className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className={cn(
-                          "h-9 w-9 transition-colors",
-                          isRecording
-                            ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                            : "hover:bg-accent",
-                        )}
-                        onClick={toggleRecording}
-                        disabled={isLoading}
-                      >
-                        <Mic className="w-4 h-4" />
-                      </Button>
-                    </div>
-                  </div>
-                  <Button
-                    onClick={handleSend}
-                    size="icon"
-                    className="h-[52px] w-[52px] flex-shrink-0 rounded-xl shadow-md hover:shadow-lg transition-shadow"
-                    disabled={isRecording || isLoading}
-                  >
-                    <Send className="w-5 h-5" />
-                  </Button>
-                </div>
-                <div className="mt-3 flex justify-end">
-                  <p className="text-xs text-muted-foreground">tokens：{inputTokens}/{maxTokensDisplay}</p>
-                </div>
               </div>
             </div>
-
-            {/* 隐藏的文件输入 */}
-            <input ref={fileInputRef} type="file" className="hidden" onChange={(e) => handleFileChange(e, "file")} />
+            
+            {/* Hidden inputs */}
             <input
-              ref={imageInputRef}
               type="file"
+              ref={fileInputRef}
+              className="hidden"
+              onChange={(e) => handleFileChange(e, "file")}
+            />
+            <input
+              type="file"
+              ref={imageInputRef}
               accept="image/*"
               className="hidden"
               onChange={(e) => handleFileChange(e, "image")}
@@ -1112,16 +941,16 @@ export function MultimodalChat() {
         ) : activeView === "settings" ? (
           <div className="flex-1 px-6 py-8 overflow-y-auto">
             <div className="max-w-3xl mx-auto">
-              <h2 className="text-3xl font-semibold mb-8 text-balance">设置</h2>
+              <h2 className="text-3xl font-semibold mb-8 text-balance text-zinc-800">设置</h2>
               <div className="space-y-6">
-                <div className="bg-card border border-border rounded-2xl p-6 shadow-sm">
-                  <h3 className="font-semibold text-lg mb-5 flex items-center gap-2">
+                <div className="bg-white border border-zinc-200 rounded-2xl p-6 shadow-sm">
+                  <h3 className="font-semibold text-lg mb-5 flex items-center gap-2 text-zinc-800">
                     <div className="w-2 h-2 rounded-full bg-primary"></div>
                     模型设置
                   </h3>
                   <div className="space-y-5">
                     <div>
-                      <label className="text-sm font-medium text-foreground mb-2 block">思维链长度</label>
+                      <label className="text-sm font-medium text-zinc-700 mb-2 block">思维链长度</label>
                       <RadioGroup
                         value={chainLevel}
                         onValueChange={(v) => {
@@ -1130,159 +959,94 @@ export function MultimodalChat() {
                         }}
                         className="grid grid-cols-3 gap-2"
                       >
-                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                        <label className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 cursor-pointer hover:bg-zinc-50 transition-colors [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5">
                           <RadioGroupItem value="basic" />
                           <span className="text-sm">初级</span>
                         </label>
-                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                        <label className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 cursor-pointer hover:bg-zinc-50 transition-colors [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5">
                           <RadioGroupItem value="medium" />
                           <span className="text-sm">中级</span>
                         </label>
-                        <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2 cursor-pointer">
+                        <label className="flex items-center gap-2 rounded-xl border border-zinc-200 px-3 py-2 cursor-pointer hover:bg-zinc-50 transition-colors [&:has([data-state=checked])]:border-primary [&:has([data-state=checked])]:bg-primary/5">
                           <RadioGroupItem value="advanced" />
                           <span className="text-sm">高级</span>
                         </label>
                       </RadioGroup>
-                      <div className="text-xs text-muted-foreground mt-2">
+                      <div className="text-xs text-zinc-400 mt-2">
                         {chainLevel === "basic" && "0–2步"}
                         {chainLevel === "medium" && "4–6步"}
                         {chainLevel === "advanced" && "10+步"}
                       </div>
                     </div>
+                    {/* More settings can be added here if needed, keeping it simple for now */}
                     <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <label className="text-sm font-medium text-foreground">温度</label>
-                        <span className="text-xs text-muted-foreground">{temperature.toFixed(1)}</span>
+                       <div className="flex items-center justify-between mb-2">
+                        <label className="text-sm font-medium text-zinc-700">温度</label>
+                        <span className="text-xs text-zinc-500">{temperature.toFixed(1)}</span>
                       </div>
                       <Slider
+                        value={[temperature]}
                         min={0}
                         max={1}
                         step={0.1}
-                        value={[temperature]}
-                        onValueChange={(vals) => setTemperature(vals[0])}
-                        className="w-full"
+                        onValueChange={([v]) => setTemperature(v)}
+                        className="py-2"
                       />
-                    </div>
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <label className="text-sm font-medium text-foreground">流式输入</label>
-                        <Switch
-                          checked={streamEnabled}
-                          onCheckedChange={setStreamEnabled}
-                        />
-                      </div>
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                          <label className="text-sm font-medium text-foreground">最大 token 数</label>
-                          <Switch
-                            checked={maxTokensEnabled}
-                            onCheckedChange={setMaxTokensEnabled}
-                          />
-                        </div>
-                        {maxTokensEnabled && (
-                          <div className="flex items-center gap-3">
-                            <Input
-                              type="number"
-                              min={1}
-                              max={8192}
-                              value={maxTokens}
-                              onChange={(e) => setMaxTokens(Number(e.target.value))}
-                              className="w-24 text-sm"
-                            />
-                            <span className="text-xs text-muted-foreground">1–8192</span>
-                          </div>
-                        )}
-                      </div>
                     </div>
                   </div>
                 </div>
-
-
               </div>
             </div>
           </div>
         ) : (
-          <div className="flex-1 px-6 py-8 overflow-y-auto">
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-3xl font-semibold mb-8 text-balance">看板</h2>
-              <div className="mt-6 bg-card border border-border rounded-2xl p-6">
-                <div className="text-sm font-medium mb-3">知识成长来源占比</div>
-                {totalGrowth === 0 ? (
-                  <div className="text-xs text-muted-foreground">暂无数据</div>
-                ) : (
-                  <div className="w-full h-64">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <defs>
-                          {growthData.map((d) => (
-                            <linearGradient id={`grad-${d.key}`} key={d.key} x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="0%" stopColor={lighten(d.color, 0.1)} />
-                              <stop offset="100%" stopColor={d.color} />
-                            </linearGradient>
-                          ))}
-                        </defs>
-                        <Pie
-                          dataKey="value"
-                          data={growthData}
-                          outerRadius={90}
-                          label
-                          onMouseEnter={(_, idx) => setActiveSlice(idx)}
-                          onMouseLeave={() => setActiveSlice(null)}
-                        >
-                          {growthData.map((d, idx) => (
-                            <Cell key={d.key} fill={activeSlice === idx ? `url(#grad-${d.key})` : d.color} />
-                          ))}
-                        </Pie>
-                        <Tooltip content={<GrowthTooltip />} />
-                        <Legend />
-                      </PieChart>
-                    </ResponsiveContainer>
+          // Dashboard View
+          <div className="flex-1 px-6 py-8 overflow-y-auto bg-zinc-50/50">
+             <div className="max-w-5xl mx-auto">
+               <div className="flex items-center justify-between mb-8">
+                 <h2 className="text-2xl font-semibold text-zinc-800">数据看板</h2>
+                 <div className="flex items-center gap-2">
+                    <Button variant="outline" size="sm" onClick={saveEfficiencyBaseline} className="bg-white">保存基准</Button>
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                  <div className="bg-white p-6 rounded-2xl border border-zinc-100 shadow-sm">
+                     <div className="text-sm text-zinc-500 mb-1">总消息数</div>
+                     <div className="text-3xl font-bold text-zinc-900">{analytics.totalMessages}</div>
                   </div>
-                )}
-              </div>
-              <div className="mt-6 bg-card border border-border rounded-2xl p-6">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-sm font-medium">交互效率</div>
-                  <Button onClick={saveEfficiencyBaseline} size="sm" className="rounded-xl">设为对比基线</Button>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-                  <div className="bg-muted rounded-xl p-4">
-                    <div className="text-xs text-muted-foreground">当前平均检索耗时</div>
-                    <div className="text-xl font-semibold mt-1">{analytics.avgRetrieval.toFixed(2)}s</div>
+                  <div className="bg-white p-6 rounded-2xl border border-zinc-100 shadow-sm">
+                     <div className="text-sm text-zinc-500 mb-1">助手回复</div>
+                     <div className="text-3xl font-bold text-zinc-900">{analytics.assistantMessages}</div>
                   </div>
-                  <div className="bg-muted rounded-xl p-4">
-                    <div className="text-xs text-muted-foreground">当前平均生成耗时</div>
-                    <div className="text-xl font-semibold mt-1">{analytics.avgGeneration.toFixed(2)}s</div>
+                  <div className="bg-white p-6 rounded-2xl border border-zinc-100 shadow-sm">
+                     <div className="text-sm text-zinc-500 mb-1">平均生成耗时</div>
+                     <div className="text-3xl font-bold text-zinc-900">{analytics.avgGeneration.toFixed(2)}s</div>
                   </div>
-                  <div className="bg-muted rounded-xl p-4">
-                    <div className="text-xs text-muted-foreground">基线时间</div>
-                    <div className="text-sm mt-1">{effBaseline ? new Date(effBaseline.timestamp).toLocaleString("zh-CN") : "未设置"}</div>
+               </div>
+
+               <div className="bg-white p-6 rounded-2xl border border-zinc-100 shadow-sm mb-6">
+                  <h3 className="font-medium text-zinc-800 mb-6">耗时趋势</h3>
+                  <div className="h-[300px] w-full">
+                     {efficiencySeries.length > 0 ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={efficiencySeries}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                          <XAxis dataKey="index" tick={{ fontSize: 12, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                          <YAxis unit="%" tick={{ fontSize: 12, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                          <Tooltip 
+                            contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
+                          />
+                          <Legend />
+                          <Line type="monotone" dataKey="retrievalGain" name="检索提升" stroke="#10b981" strokeWidth={3} dot={false} />
+                          <Line type="monotone" dataKey="generationGain" name="生成提升" stroke="#3b82f6" strokeWidth={3} dot={false} />
+                        </LineChart>
+                      </ResponsiveContainer>
+                     ) : (
+                       <div className="flex items-center justify-center h-full text-zinc-400 text-sm">暂无足够数据</div>
+                     )}
                   </div>
-                </div>
-                {effBaseline && (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="bg-muted rounded-xl p-4">
-                      <div className="text-xs text-muted-foreground">检索耗时提升对比</div>
-                      <div className="text-xl font-semibold mt-1">
-                        {effBaseline.avgRetrieval > 0
-                          ? `${(((effBaseline.avgRetrieval - analytics.avgRetrieval) / effBaseline.avgRetrieval) * 100).toFixed(0)}%`
-                          : "-"}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">相对上一版本</div>
-                    </div>
-                    <div className="bg-muted rounded-xl p-4">
-                      <div className="text-xs text-muted-foreground">生成耗时提升对比</div>
-                      <div className="text-xl font-semibold mt-1">
-                        {effBaseline.avgGeneration > 0
-                          ? `${(((effBaseline.avgGeneration - analytics.avgGeneration) / effBaseline.avgGeneration) * 100).toFixed(0)}%`
-                          : "-"}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">相对上一版本</div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+               </div>
+             </div>
           </div>
         )}
       </main>
