@@ -534,12 +534,12 @@ def retrieval_evaluation_loop(question: str, max_iterations: int = 3) -> Dict[st
     return loop_log
 
 
-f"""
-这个环节和之前一样
-for(子问题)
+    f"""
+    这个环节和之前一样
+    or(子问题)
     直接调用 retrieval_evaluation_loop即可
-整合时，需要手动补上拼接问答对的操作，下面有整合问答对的函数和最终的提示词，仅供参考
-"""
+    整合时，需要手动补上拼接问答对的操作，下面有整合问答对的函数和最终的提示词，仅供参考
+    """
 
 
 # 问答生成提示词模板
