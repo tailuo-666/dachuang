@@ -134,14 +134,74 @@ class OCRRAGController:
 
         return is_relevant, reason
 
-    def ask_question_with_fallback(self, question, show_docs=True):
+    # def ask_question_with_fallback(self, question, show_docs=True):
+    #     """带回落机制的问答：如果相关性不足，自动触发爬虫"""
+    #     if self.rag_system is None:
+    #         print("RAG系统未初始化")
+    #         return "系统未就绪，请先初始化RAG系统", []
+    #     try:
+    #         # 第一次尝试：使用现有知识库回答
+    #         print("正在检索现有文档...")
+    #         answer, relevant_docs = self.rag_system.ask_question(
+    #             question,
+    #             show_docs=show_docs,
+    #             use_enhanced=self.use_enhanced
+    #         )
+    #
+    #         # 评估相关性
+    #         is_relevant, reason = self.evaluate_relevance(relevant_docs)
+    #         is_relevant = True
+    #         if is_relevant:
+    #             print(f"文档相关性评估：通过 ({reason})")
+    #             return answer, relevant_docs
+    #         else:
+    #             print(f"文档相关性评估：不足 ({reason})")
+    #             print("正在尝试获取最新研究论文...")
+    #
+    #             # 触发爬虫获取新论文
+    #             if self.fetch_latest_papers(question,max_papers=3):
+    #                 # 处理新论文并更新RAG系统
+    #                 self.process_all_pdfs()
+    #
+    #                 # 第二次尝试：使用更新后的知识库回答
+    #                 print("使用更新后的知识库重新回答问题...")
+    #                 answer, docs = self.rag_system.ask_question(
+    #                     question,
+    #                     show_docs=show_docs,
+    #                     use_enhanced=self.use_enhanced
+    #                 )
+    #
+    #                 # 再次评估
+    #                 is_relevant, reason = self.evaluate_relevance(question, docs)
+    #                 if is_relevant:
+    #                     print(f"更新后文档相关性评估：通过 ({reason})")
+    #                 else:
+    #                     print(f"更新后文档相关性评估：仍然不足 ({reason})")
+    #                     answer = f"{answer}\n\n注意：即使获取了最新论文，相关信息仍然有限。"
+    #
+    #                 return answer, docs
+    #             else:
+    #                 return "无法获取最新论文，请检查网络连接或稍后重试", []
+    #
+    #     except Exception as e:
+    #         print(f"处理问题时出错: {e}")
+    #         return f"处理问题时出错: {e}", []
+    def ask_question_with_fallback(self, question, show_docs=True, progress_callback=None):
         """带回落机制的问答：如果相关性不足，自动触发爬虫"""
+
+        # 定义一个内部日志函数，同时打印到控制台和发送给前端
+        def log(msg):
+            print(msg)
+            if progress_callback:
+                progress_callback(msg)
+
         if self.rag_system is None:
-            print("RAG系统未初始化")
+            log("RAG系统未初始化")
             return "系统未就绪，请先初始化RAG系统", []
+
         try:
             # 第一次尝试：使用现有知识库回答
-            print("正在检索现有文档...")
+            log("正在检索现有文档...")
             answer, relevant_docs = self.rag_system.ask_question(
                 question,
                 show_docs=show_docs,
@@ -150,42 +210,45 @@ class OCRRAGController:
 
             # 评估相关性
             is_relevant, reason = self.evaluate_relevance(relevant_docs)
-            is_relevant = True
+            is_relevant = True  # 你的原代码中这里被强制设为了 True，请注意
+
             if is_relevant:
-                print(f"文档相关性评估：通过 ({reason})")
+                log(f"文档相关性评估：通过 ({reason})")
+                log("生成最终答案完成。")
                 return answer, relevant_docs
             else:
-                print(f"文档相关性评估：不足 ({reason})")
-                print("正在尝试获取最新研究论文...")
+                log(f"文档相关性评估：不足 ({reason})")
+                log("正在尝试从 Arxiv 获取最新研究论文...")
 
                 # 触发爬虫获取新论文
-                if self.fetch_latest_papers(question,max_papers=3):
-                    # 处理新论文并更新RAG系统
+                if self.fetch_latest_papers(question, max_papers=3):
+                    log("新论文下载完成，开始处理 PDF 并更新向量库...")
                     self.process_all_pdfs()
 
                     # 第二次尝试：使用更新后的知识库回答
-                    print("使用更新后的知识库重新回答问题...")
+                    log("使用更新后的知识库重新回答问题...")
                     answer, docs = self.rag_system.ask_question(
                         question,
                         show_docs=show_docs,
                         use_enhanced=self.use_enhanced
                     )
 
-                    # 再次评估
-                    is_relevant, reason = self.evaluate_relevance(question, docs)
+                    is_relevant, reason = self.evaluate_relevance(docs)
                     if is_relevant:
-                        print(f"更新后文档相关性评估：通过 ({reason})")
+                        log(f"更新后文档相关性评估：通过 ({reason})")
                     else:
-                        print(f"更新后文档相关性评估：仍然不足 ({reason})")
+                        log(f"更新后文档相关性评估：仍然不足 ({reason})")
                         answer = f"{answer}\n\n注意：即使获取了最新论文，相关信息仍然有限。"
 
                     return answer, docs
                 else:
+                    log("无法获取最新论文，请检查网络连接或稍后重试")
                     return "无法获取最新论文，请检查网络连接或稍后重试", []
 
         except Exception as e:
-            print(f"处理问题时出错: {e}")
-            return f"处理问题时出错: {e}", []
+            err_msg = f"处理问题时出错: {e}"
+            log(err_msg)
+            return err_msg, []
 
     def run_interactive(self):
         """运行交互式问答系统"""

@@ -38,29 +38,14 @@ class RAGSystem:
             from langchain_openai import ChatOpenAI
             # from langchain_community.llms import VLLM
 
-            self.llm = llm = ChatOpenAI(
+            self.llm = ChatOpenAI(
                 model="../llm/DeepSeek-R1-0528-Qwen3-8B",
-                openai_api_base="http://localhost:8000/v1",
+                openai_api_base="http://localhost:8001/v1",
                 openai_api_key="EMPTY",
                 max_tokens=2048,
                 temperature=0.3,
                 top_p=0.9,
             )
-            # self.llm = VLLM(
-            #     model=model_path,
-            #     trust_remote_code=True,
-            #     max_new_tokens=2048,
-            #     temperature=0.3,
-            #     top_p=0.9,
-            #     repetition_penalty=1.1,
-            #     tensor_parallel_size=1,  # 多GPU并行，根据你的GPU数量调整
-            #     gpu_memory_utilization=0.5,  # GPU内存使用率
-            #     # vLLM 特有参数
-            #     max_model_len=4096,  # 最大模型长度
-            #     # enable_prefix_caching=True,  # 启用前缀缓存加速
-            #     # max_num_seqs=16,  # 最大序列数
-            #     # max_num_batched_tokens=2048,  # 批次最大token数
-            # )
 
             print("vLLM 语言模型加载完成")
 
