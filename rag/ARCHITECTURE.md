@@ -218,15 +218,16 @@ middleware 的作用：
 文件：
 
 - `rag/llm_factory.py`
-- `test_ssh_vllm.py`
 
 职责：
 
 - `llm_factory.py` 提供统一 LLM 构造入口
-- `test_ssh_vllm.py` 当前承载 SSH + vLLM 的复用工厂函数
 
 说明：
 
+- 当前默认走服务器本机直连 vLLM OpenAI 兼容接口
+- 默认地址为 `http://127.0.0.1:8001/v1`
+- 可通过 `RAG_LLM_BASE_URL`、`RAG_LLM_HOST`、`RAG_LLM_PORT`、`RAG_LLM_MODEL`、`RAG_LLM_API_KEY` 覆盖
 - 后续如果切换模型或切换部署方式，应优先改 `llm_factory.py`
 - 业务代码不应到处直接写死模型构造逻辑
 

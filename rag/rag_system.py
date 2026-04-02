@@ -35,7 +35,7 @@ class RAGSystem:
 
     def setup_llm(self, model_path="../llm/DeepSeek-R1-0528-Qwen3-8B"):
         """设置语言模型"""
-        print("正在加载 DashScope qwen-plus 语言模型...")
+        print("正在连接本机 vLLM 语言模型服务...")
         self.llm = create_default_llm()
         print("语言模型加载完成")
 
