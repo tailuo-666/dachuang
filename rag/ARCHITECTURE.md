@@ -1,562 +1,276 @@
-# RAG Agent 系统架构文档
+# RAG Architecture
 
-## 📋 目录
-1. [系统概述](#系统概述)
-2. [架构图](#架构图)
-3. [模块详解](#模块详解)
-4. [数据流](#数据流)
-5. [技术栈](#技术栈)
+## 目录位置
 
----
+当前架构文档位于：
 
-## 系统概述
+`C:\Users\jack\Desktop\demo\rag\ARCHITECTURE.md`
 
-这是一个基于 **Agent 智能驱动** 的学术论文 RAG 问答系统，核心特点：
+当前 `rag/` 目录结构如下：
 
-- 🤖 **自主决策**：Agent 根据问题复杂度自动规划执行策略
-- 🔍 **混合检索**：BM25 + 向量检索，提升召回率
-- 📊 **相关性评估**：BERT 语义相似度判断是否需要补充信息
-- 🌐 **智能回落**：本地知识不足时自动爬取 ArXiv 论文
-- 📄 **PDF 处理**：OCR + 布局分析，支持学术论文提取
-
----
-
-## 架构图
-
-### 整体架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         用户/前端                                 │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTP API
-                         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    api_server.py (API 层)                        │
-│  - FastAPI 服务器                                                 │
-│  - 任务管理 (tasks_db)                                            │
-│  - 进度回调 (timeline)                                            │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ run_rag_task()
-                         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                   engine.py (Agent 核心)                         │
-│  RagService:                                                     │
-│  - LLM: qwen-plus (云端决策)                                      │
-│  - Agent: 自主规划和执行                                          │
-│  - SYSTEM_PROMPT: 执行策略                                        │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ invoke 6 tools
-                         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                   tools.py (工具层)                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │query_        │  │retriever     │  │value_        │          │
-│  │transform     │  │              │  │evaluator     │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐          │
-│  │web_deep_     │  │save_sub_     │  │report_       │          │
-│  │research      │  │task_result   │  │generator     │          │
-│  └──────────────┘  └──────────────┘  └──────────────┘          │
-│                                                                  │
-│  依赖注入: init_tools(rag_system, pdf_processor, llm)            │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ 调用底层能力
-                         ↓
-┌─────────────────────────────────────────────────────────────────┐
-│                    底层能力模块                                   │
-│  ┌──────────────────┐  ┌──────────────────┐                     │
-│  │ rag_system.py    │  │ checkDecompo-    │                     │
-│  │ - RAGSystem      │  │ sition.py        │                     │
-│  │ - 混合检索        │  │ - 查询分解        │                     │
-│  │ - 答案生成        │  └──────────────────┘                     │
-│  └──────────────────┘                                           │
-│  ┌──────────────────┐  ┌──────────────────┐                     │
-│  │ value.py         │  │ arxiv_crawler_   │                     │
-│  │ - 相关性评估      │  │ integrated.py    │                     │
-│  │ - BERT 语义相似度 │  │ - 论文爬取        │                     │
-│  └──────────────────┘  └──────────────────┘                     │
-│  ┌──────────────────┐  ┌──────────────────┐                     │
-│  │ pdf_processor.py │  │ main_controller  │                     │
-│  │ - PDF 提取       │  │ .py              │                     │
-│  │ - OCR 处理       │  │ - 资源管理器      │                     │
-│  └──────────────────┘  └──────────────────┘                     │
-└─────────────────────────────────────────────────────────────────┘
+```text
+rag/
+├── agent/
+├── crawlers/
+├── query/
+├── retrieval/
+├── testing/
+├── api_server.py
+├── llm_factory.py
+├── main_controller.py
+├── pdf_processor.py
+├── rag_system.py
+├── schemas.py
+└── ARCHITECTURE.md
 ```
 
-### Agent 工作流
+## 当前主流程
 
-```
-用户提问
-    ↓
-┌─────────────────────────────────────────────────────────────┐
-│ Agent 自主决策循环                                            │
-│                                                              │
-│  1. Plan (规划)                                              │
-│     └─→ query_transform: 分解为子问题 [Q1, Q2, Q3]           │
-│                                                              │
-│  2. Loop (循环处理每个子问题)                                 │
-│     ├─→ Act: retriever(Q1) - 检索本地知识库                  │
-│     ├─→ Check: value_evaluator(Q1, docs) - 评估相关性        │
-│     ├─→ Decide:                                              │
-│     │   ├─ YES → 基于文档生成答案                             │
-│     │   └─ NO → web_deep_research(Q1)                        │
-│     │            ├─ 爬取 ArXiv 论文                           │
-│     │            ├─ 下载 PDF                                  │
-│     │            ├─ OCR 处理                                  │
-│     │            ├─ 更新向量库                                │
-│     │            └─ 重新检索                                  │
-│     └─→ Save: save_sub_task_result(Q1, answer)              │
-│                                                              │
-│  3. Finish (完成)                                            │
-│     └─→ report_generator() - 综合所有子答案生成最终报告       │
-└─────────────────────────────────────────────────────────────┘
-    ↓
-返回答案 + 来源
+现在系统已经不再使用“查询分解 -> 子问题循环 -> 汇总”的旧链路。
+
+当前正式流程是：
+
+```text
+用户输入
+  -> QueryPlan 生成
+  -> 本地知识库检索
+  -> hook 评估相关性
+  -> 如有必要则调用学术爬虫
+  -> 基于证据生成最终答案
 ```
 
----
-
-## 模块详解
-
-### 1️⃣ api_server.py - API 服务层
-
-**职责**：HTTP 接口、任务管理、进度追踪
-
-**关键功能**：
-- `POST /api/task/create`: 创建问答任务
-- `GET /api/task/{task_id}`: 查询任务状态
-- `run_rag_task()`: 后台执行 Agent 流程
-
-**启动初始化**：
-```python
-controller = OCRRAGController("./pdf")
-controller.setup_pdf_processor()
-controller.setup_arxiv_crawler()
-controller.rag_system = setup_rag_system()
-init_tools(controller.rag_system, controller.process_pdf_folder, agent_llm)
-```
-
-**响应格式**：
-```json
-{
-  "status": "completed",
-  "timeline": [
-    {"time": "10:30:15", "message": "Agent 开始处理查询..."},
-    {"time": "10:30:18", "message": "正在检索: 什么是RAG？"}
-  ],
-  "result": {
-    "answer": "RAG (Retrieval-Augmented Generation) 是...",
-    "sources": [
-      {"content": "...", "source": "paper1.pdf"}
-    ]
-  }
-}
-```
-
----
-
-### 2️⃣ engine.py - Agent 核心
-
-**职责**：Agent 决策引擎
-
-**关键组件**：
-- `RagService`: Agent 服务类
-- `llm`: qwen-plus (DashScope 云端)
-- `SYSTEM_PROMPT`: 定义执行策略
-
-**执行策略**：
-```
-Plan → Loop(Act → Check → Decide → Save) → Finish
-```
-
-**代码示例**：
-```python
-agent_service = RagService()
-result = agent_service.run(query="如何优化RAG检索质量？")
-# 返回: {"messages": [...]}
-```
-
----
-
-### 3️⃣ tools.py - 工具层
-
-**职责**：6个 Agent 工具 + 依赖注入
-
-#### 工具列表
-
-| 工具 | 功能 | 调用对象 |
-|------|------|---------|
-| `query_transform` | 查询分解 | `QueryDecomposerAgent(_llm)` |
-| `retriever` | 本地检索 | `_rag_system.retriever.invoke()` |
-| `value_evaluator` | 相关性评估 | `RelevanceGraderTool._run()` |
-| `web_deep_research` | 爬虫+更新 | `ArxivCrawler + PDFProcessor + RAGSystem` |
-| `save_sub_task_result` | 保存答案 | `context.qa_pairs.append()` |
-| `report_generator` | 生成报告 | `context.qa_pairs` |
-
-#### 依赖注入机制
-
-```python
-# 模块级变量
-_rag_system = None
-_pdf_processor = None
-_llm = None
-_progress_callback = None
-
-# 启动时注入
-def init_tools(rag_system, pdf_processor, llm):
-    global _rag_system, _pdf_processor, _llm
-    _rag_system = rag_system
-    _pdf_processor = pdf_processor
-    _llm = llm
-```
-
-#### ResearchContext（全局上下文）
-
-```python
-class ResearchContext:
-    qa_pairs = []          # 子问题答案对
-    original_query = ""    # 原始查询
-    sub_questions = []     # 子问题列表
-    papers = []            # 检索到的文档（用于提取 sources）
-```
+这个流程是单查询工作流，不再维护子问题列表，也不再保存 `qa_pairs` 一类中间结果。
 
----
+## 核心模块
 
-### 4️⃣ rag_system.py - RAG 核心
+### 1. 查询规划
 
-**职责**：向量检索、混合检索、答案生成
+文件：
 
-**关键配置**：
-- **LLM**: DeepSeek (vLLM `localhost:8001`)
-- **Embeddings**: BGE-m3 (本地 `/root/.cache/modelscope/hub/models/BAAI/bge-m3`)
-- **混合检索**: BM25 (40%) + Vector (60%)
-- **向量库**: FAISS
+- `rag/query/optimizer.py`
+- `rag/query/service.py`
 
-**核心方法**：
-```python
-# 被 tools.py 调用
-docs = rag_system.retriever.invoke("什么是RAG？")
+职责：
 
-# 更新向量库（新 PDF 处理后）
-rag_system.update_rag_system()
-```
+- 将用户原始问题转成单一的学术查询计划
+- 生成中英文检索语句
+- 提取中英文关键词
+- 做术语规范化和翻译映射
 
----
+核心数据结构：
 
-### 5️⃣ checkDecomposition.py - 查询分解
+- `AcademicQueryPlan`
 
-**职责**：判断是否需要分解查询
+字段包括：
 
-**策略**：
-1. spaCy NER 提取实体
-2. 计算复杂度评分
-3. 边界情况使用 LLM 轻量检查
+- `original_query`
+- `normalized_query_zh`
+- `retrieval_query_zh`
+- `retrieval_query_en`
+- `crawler_query_en`
+- `keywords_zh`
+- `keywords_en`
+- `term_replacements`
 
-**返回**：
-```python
-needs_decomposition, reason, sub_questions = decomposer.route_query(query)
-# 示例: True, "复杂查询", ["子问题1", "子问题2", "子问题3"]
-```
+说明：
 
----
+- `retrieval_query_zh` 用于本地知识库检索
+- `crawler_query_en` 和 `keywords_en` 用于学术站点爬虫
+- 查询规划不是 agent 工具，而是在 agent 启动前由 middleware 注入
 
-### 6️⃣ value.py - 相关性评估
+### 2. 检索与相关性评估
 
-**职责**：评估检索文档是否足以回答问题
+文件：
 
-**策略**：
-- **BERT 策略**（默认）：BGE-m3 语义相似度，阈值 0.75
-- **LLM 策略**：大模型深度理解（可选）
+- `rag/agent/tools_impl.py`
+- `rag/retrieval/evaluator.py`
 
-**返回**：
-```python
-result = grader._run(query, documents, strategy="bert")
-# {"action": "use_context", "score": 0.82, "reason": "semantic_similarity_pass"}
-# 或
-# {"action": "call_crawler", "score": 0.65, "reason": "low_similarity"}
-```
+职责：
 
-**模型配置**：
-```python
-# 优先使用本地 BGE-m3
-local_embedding_path = "/root/.cache/modelscope/hub/models/BAAI/bge-m3"
-# 回退到在线模型
-fallback = "sentence-transformers/all-MiniLM-L6-v2"
-```
-
----
-
-### 7️⃣ arxiv_crawler_integrated.py - 论文爬虫
-
-**职责**：爬取、下载、格式化 ArXiv 论文
-
-**核心方法**：
-```python
-crawler = ArxivCrawlerIntegrated("./paper_results")
-papers = crawler.crawl_papers("RAG optimization", max_pages=3)
-crawler.download_papers(papers, max_downloads=3)
-```
-
----
-
-### 8️⃣ pdf_processor.py - PDF 处理
-
-**职责**：PDF 文本提取（OCR + 布局分析）
-
-**技术**：
-- PyMuPDF (fitz)
-- PaddleOCR
-- pdftotext
-
-**输出**：Markdown 文件到 `./md/`
-
----
-
-### 9️⃣ main_controller.py - 资源管理器
-
-**职责**：管理 PDF/爬虫/RAG 资源
-
-**保留方法**（被 tools.py 调用）：
-- `setup_pdf_processor()`
-- `setup_arxiv_crawler()`
-- `process_all_pdfs()`
-
-**弃用方法**（已被 Agent 替代）：
-- `ask_question_with_fallback()`
-- `evaluate_relevance()`
-
----
-
-### 🔟 query_processor.py - 查询处理
-
-**职责**：文档评分、答案生成
-
-**被调用者**：`rag_system.py` 的 `enhanced_ask_question()`
-
----
-
-## 数据流
-
-### 场景 1：简单查询（本地知识充足）
-
-```
-用户: "什么是RAG？"
-  ↓
-api_server.py: 创建任务
-  ↓
-engine.py: Agent 启动
-  ↓
-tools.py: query_transform → 不分解（单一问题）
-  ↓
-tools.py: retriever → 检索本地向量库
-  ↓ (返回 5 个文档)
-tools.py: value_evaluator → BERT 评分 0.85 (PASS)
-  ↓
-tools.py: save_sub_task_result → 保存答案
-  ↓
-tools.py: report_generator → 生成最终报告
-  ↓
-api_server.py: 提取答案和来源
-  ↓
-返回: {"answer": "RAG是...", "sources": [...]}
-```
-
-### 场景 2：复杂查询（需要爬虫）
-
-```
-用户: "对比 DeepSeek 和 ChatGPT 的推理能力和成本"
-  ↓
-api_server.py: 创建任务
-  ↓
-engine.py: Agent 启动
-  ↓
-tools.py: query_transform → 分解为 3 个子问题
-  - Q1: "DeepSeek 的推理能力如何？"
-  - Q2: "ChatGPT 的推理能力如何？"
-  - Q3: "两者的成本对比"
-  ↓
-【循环处理 Q1】
-tools.py: retriever(Q1) → 检索本地向量库
-  ↓ (返回 3 个文档，但相关性低)
-tools.py: value_evaluator(Q1) → BERT 评分 0.62 (FAIL)
-  ↓
-tools.py: web_deep_research(Q1)
-  ├─ ArxivCrawler: 爬取 3 篇论文
-  ├─ 下载 PDF 到 ./paper_results/
-  ├─ PDFProcessor: OCR 处理 → ./md/
-  ├─ RAGSystem: update_rag_system() 更新向量库
-  └─ retriever(Q1): 重新检索 → 返回新文档
-  ↓
-tools.py: save_sub_task_result(Q1, answer)
-  ↓
-【循环处理 Q2, Q3...】
-  ↓
-tools.py: report_generator → 综合 3 个子答案
-  ↓
-api_server.py: 提取答案和来源
-  ↓
-返回: {"answer": "综合分析...", "sources": [新下载的论文...]}
-```
-
----
-
-## 技术栈
-
-### 后端框架
-- **FastAPI**: API 服务器
-- **LangChain**: Agent 框架、工具链
-
-### LLM 配置
-
-| 组件 | 模型 | 位置 | 用途 |
-|------|------|------|------|
-| engine.py | qwen-plus | DashScope 云端 | Agent 决策、推理 |
-| rag_system.py | DeepSeek-R1 | vLLM localhost:8001 | 文档问答生成 |
-| checkDecomposition.py | qwen-plus | 注入自 engine.py | 查询分解 |
-| value.py | BGE-m3 (BERT) | 本地 | 相关性评估 |
-
-### Embedding 模型
-- **BGE-m3**: `/root/.cache/modelscope/hub/models/BAAI/bge-m3`
-- **维度**: 1024
-- **用途**: 文档向量化、语义相似度计算
-
-### 向量数据库
-- **FAISS**: 本地向量库 (`./faiss/`)
-- **BM25**: 关键词检索
-- **混合检索**: BM25 (40%) + Vector (60%)
-
-### NLP 工具
-- **spaCy**: 中文 NER (`zh_core_web_sm`)
-- **PaddleOCR**: PDF OCR 处理
-
-### 爬虫
-- **requests + BeautifulSoup**: ArXiv 爬取
-- **PyMuPDF (fitz)**: PDF 解析
-
----
-
-## 目录结构
-
-```
-D:\pycharmcode\llm\
-├── api_server.py              # API 服务层
-├── engine.py                  # Agent 核心
-├── tools.py                   # 工具层
-├── rag_system.py             # RAG 核心
-├── checkDecomposition.py     # 查询分解
-├── value.py                  # 相关性评估
-├── arxiv_crawler_integrated.py # 论文爬虫
-├── pdf_processor.py          # PDF 处理
-├── main_controller.py        # 资源管理器
-├── query_processor.py        # 查询处理
-│
-├── pdf/                      # PDF 输入目录
-├── md/                       # Markdown 输出目录
-├── faiss/                    # FAISS 向量库
-├── paper_results/            # 爬虫输出目录
-└── documents/                # 文档存储
-```
-
----
-
-## 关键改进（集成后）
-
-### 改进前（线性流程）
-```
-用户提问 → 检索 → 简单评估 → 爬虫（如果需要） → 返回答案
-```
-- ❌ 决策逻辑固定
-- ❌ 无法处理复杂查询
-- ❌ 评估标准简单
-
-### 改进后（Agent 驱动）
-```
-用户提问 → Agent 自主规划 → 动态执行 → 智能回落 → 综合报告
-```
-- ✅ 自主决策（Plan-Act-Check-Decide）
-- ✅ 查询分解（处理复杂问题）
-- ✅ BERT 语义评估（精准判断）
-- ✅ 自动爬虫+更新（知识增量）
-- ✅ 进度追踪（实时反馈）
-
----
-
-## 配置文件
-
-### 环境变量
-```bash
-# DashScope API Key (qwen-plus)
-DASHSCOPE_API_KEY=sk-e4b7b6386950428bb71c658d47da47ef
-
-# vLLM 服务地址
-VLLM_BASE_URL=http://localhost:8001/v1
-
-# 本地模型路径
-BGE_M3_PATH=/root/.cache/modelscope/hub/models/BAAI/bge-m3
-```
-
-### 启动命令
-```bash
-# 启动 vLLM 服务（DeepSeek）
-python -m vllm.entrypoints.openai.api_server \
-  --model ../llm/DeepSeek-R1-0528-Qwen3-8B \
-  --port 8001
-
-# 启动 API 服务
-uvicorn api_server:app --host 0.0.0.0 --port 8000
-```
-
----
-
-## 测试验证
-
-### 1. 启动验证
-```bash
-uvicorn api_server:app --host 0.0.0.0 --port 8000
-```
-观察日志：
-- ✅ "Tools initialized with dependencies"
-- ✅ "使用本地 BGE-m3 模型"
-- ✅ "系统初始化完成！"
-
-### 2. 简单查询测试
-```bash
-curl -X POST http://localhost:8000/api/task/create \
-  -H "Content-Type: application/json" \
-  -d '{"question": "什么是RAG？"}'
-  预期：返回 task_id，轮询后获得答案
-```
-
-### 3. 复杂查询测试
-```bash
-curl -X POST http://localhost:8000/api/task/create \
-  -H "Content-Type: application/json" \
-  -d '{"question": "对比DeepSeek和ChatGPT的推理能力和成本"}'
-  预期：timeline 中出现"正在分解查询"、多次"正在检索"
-```
-
-### 4. 爬虫回落测试
-提交本地库无相关内容的问题，验证：
-- timeline 出现 "正在执行深度爬虫"
-- timeline 出现 "正在处理下载的PDF并更新向量库"
-- sources 包含新下载的论文
-
----
-
-## 维护日志
-
-### 2025-01-XX - Agent 架构集成
-- ✅ 修复 engine.py Bug（未定义变量）
-- ✅ 实现 tools.py 依赖注入机制
-- ✅ 重写 api_server.py 使用 Agent 架构
-- ✅ 完成 value.py TODO（使用本地 BGE-m3 模型）
-- ✅ 保持 main_controller.py 向后兼容
-
----
-
-## 联系方式
-
-如有问题，请参考：
-- 计划文档: `C:\Users\admin123\.claude\plans\replicated-honking-toucan.md`
-- 内存文档: `C:\Users\admin123\.claude\projects\D--pycharmcode-llm\memory\MEMORY.md`
+- `retrieve_local_kb` 负责调用本地 retriever
+- 检索结果统一转换为标准文档结构
+- 检索后立即做非 LLM 的规则式相关性评估
+
+当前评估方式：
+
+- 基于 `keywords_en` 做关键词覆盖率计算
+- 统计 top 文档覆盖率和来源数
+- 判断当前本地证据是否足够回答
+
+输出结果写入：
+
+- `retrieval_sufficient`
+- `relevance_score`
+- `relevance_reason`
+- `crawl_required`
+
+### 3. 学术爬虫
+
+文件：
+
+- `rag/crawlers/arxiv.py`
+- `rag/agent/tools_impl.py`
+
+职责：
+
+- `crawl_academic_sources` 根据 `crawler_query_en` 与 `keywords_en` 爬取学术内容
+- 当前默认站点是 arXiv
+- 即使没有 PDF 下载和入库，也会立即返回 title/abstract 级证据
+
+爬虫返回统一结构：
+
+- `papers`
+- `evidence_docs`
+- `downloaded_count`
+- `indexed_doc_count`
+
+说明：
+
+- 当前爬虫不再接收子问题
+- 当前爬虫不再依赖旧的英文正则拆词主逻辑
+- 中文输入的适配通过 QueryPlan 阶段完成
+
+### 4. Agent 与 Hook
+
+文件：
+
+- `rag/agent/builder.py`
+- `rag/agent/middleware.py`
+- `rag/agent/runtime.py`
+
+职责：
+
+- 用 LangChain v1 `create_agent(...)` 构建正式 agent
+- 用 middleware 约束工作流，而不是把流程控制交给模型自由发挥
+
+当前只保留两个正式工具：
+
+- `retrieve_local_kb`
+- `crawl_academic_sources`
+
+middleware 的作用：
+
+- `before_agent`
+  - 读取用户问题
+  - 生成 `AcademicQueryPlan`
+  - 初始化运行态
+- `wrap_model_call`
+  - 动态限制模型当前可见工具
+  - 初始阶段只允许调用本地检索
+  - 检索不足时才允许调用爬虫
+  - 检索足够后禁止继续爬虫
+- `wrap_tool_call`
+  - 检索工具返回后自动评估相关性
+  - 爬虫工具返回后写入补充证据
+
+## 数据模型
+
+文件：
+
+- `rag/schemas.py`
+
+当前共享模型包括：
+
+- `TermReplacement`
+- `AcademicQueryPlan`
+- `NormalizedDocument`
+- `RetrievalPayload`
+- `CrawlPaper`
+- `CrawlPayload`
+- `RelevanceEvaluation`
+- `ResearchState`
+
+这些结构的作用是统一：
+
+- agent state
+- 工具返回格式
+- 检索与爬虫证据格式
+- API 层可消费的数据结构
+
+## API 层与运行时
+
+文件：
+
+- `rag/api_server.py`
+- `rag/main_controller.py`
+- `rag/rag_system.py`
+- `rag/agent/runtime.py`
+
+职责划分：
+
+- `api_server.py`
+  - 提供 FastAPI 接口
+  - 创建任务
+  - 启动 agent
+  - 汇总 timeline 和最终 answer
+- `main_controller.py`
+  - 保留 OCR / PDF / RAG 主系统初始化入口
+  - 保留论文抓取和 PDF 处理的外围调度
+- `rag_system.py`
+  - 管理向量库、BM25、混合检索器、基础问答链
+  - 在非 agent 场景下也能使用单查询 QueryPlan
+- `runtime.py`
+  - 保存当前运行期上下文
+  - 为 API 层提供 `context.papers`
+
+## LLM 配置入口
+
+文件：
+
+- `rag/llm_factory.py`
+- `test_ssh_vllm.py`
+
+职责：
+
+- `llm_factory.py` 提供统一 LLM 构造入口
+- `test_ssh_vllm.py` 当前承载 SSH + vLLM 的复用工厂函数
+
+说明：
+
+- 后续如果切换模型或切换部署方式，应优先改 `llm_factory.py`
+- 业务代码不应到处直接写死模型构造逻辑
+
+## 当前保留的测试
+
+文件：
+
+- `rag/testing/fixtures.py`
+- `rag/testing/test_single_query_flow.py`
+
+覆盖内容：
+
+- 中文 QueryPlan 生成
+- 中英混合 QueryPlan 生成
+- 检索充分时跳过爬虫
+- 检索不足时触发爬虫
+- arXiv 查询串构建
+- 无 PDF 时证据文档生成
+- middleware 的工具过滤逻辑
+
+## 已删除的旧链路
+
+以下旧链路文件和目录已经从正式主流程中移除：
+
+- 旧查询分解逻辑
+- 旧子问题驱动工具链
+- 旧兼容壳文件
+- `查询优化与判断相关性` 目录
+
+当前项目中不再存在这些正式入口：
+
+- `query_transform`
+- `value_evaluator`
+- `web_deep_research`
+- `save_sub_task_result`
+- `report_generator`
+- `checkDecomposition.py`
+
+## 后续维护建议
+
+建议后续继续保持下面这条原则：
+
+- 所有“查询 -> 检索 -> 判断 -> 爬虫 -> 回答”的逻辑，只放在 `rag/` 这一套正式模块里
+- 不再引入第二套平行实验链路
+- 如果要扩展站点爬虫，只扩展 `rag/crawlers/`
+- 如果要调整判断逻辑，只改 `rag/retrieval/evaluator.py` 和 `rag/agent/middleware.py`
+- 如果要调整提示词和查询规划，只改 `rag/query/`

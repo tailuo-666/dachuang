@@ -3,8 +3,7 @@ import os
 import time
 from pdf_processor import PDFProcessor
 from rag_system import setup_rag_system
-# from arxiv_crawler import create_arxiv_crawler
-from arxiv_crawler_integrated import create_arxiv_crawler_integrated
+from crawlers.arxiv import create_arxiv_crawler_integrated
 
 class OCRRAGController:
     def __init__(self, pdf_folder_path):
@@ -210,7 +209,6 @@ class OCRRAGController:
 
             # 评估相关性
             is_relevant, reason = self.evaluate_relevance(relevant_docs)
-            is_relevant = True  # 你的原代码中这里被强制设为了 True，请注意
 
             if is_relevant:
                 log(f"文档相关性评估：通过 ({reason})")

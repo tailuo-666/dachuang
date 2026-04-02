@@ -6,8 +6,9 @@ import time
 from datetime import datetime
 from main_controller import OCRRAGController
 from rag_system import setup_rag_system
-from engine import RagService, llm as agent_llm
-from tools import init_tools, set_progress_callback, context as research_context
+from agent.builder import RagService
+from agent.runtime import context as research_context, init_runtime, set_progress_callback
+from llm_factory import create_default_llm
 
 app = FastAPI(title="RAG Backend API")
 
@@ -31,10 +32,10 @@ controller.setup_arxiv_crawler()
 controller.rag_system = setup_rag_system()
 
 # 初始化 Agent 工具依赖
-init_tools(
+init_runtime(
     rag_system=controller.rag_system,
     pdf_processor=controller.process_pdf_folder,
-    llm=agent_llm
+    llm=create_default_llm(),
 )
 print("系统初始化完成！")
 
@@ -78,16 +79,22 @@ def run_rag_task(task_id: str, question: str):
                 final_answer = content
                 break
 
-        # 提取 sources：从 context.papers（retriever 和 web_deep_research 均写入）
+        # 提取 sources：从 context.papers（检索和爬虫阶段都会写入）
         seen = set()
         formatted_docs = []
         for doc in research_context.papers:
-            if not hasattr(doc, 'page_content'):
+            if hasattr(doc, 'page_content'):
+                source = doc.metadata.get("source", "未知文件")
+                content = doc.page_content[:300]
+            elif isinstance(doc, dict):
+                source = doc.get("source") or doc.get("metadata", {}).get("title") or "未知文件"
+                content = str(doc.get("content", ""))[:300]
+            else:
                 continue
-            source = doc.metadata.get("source", "未知文件")
+
             if source not in seen:
                 formatted_docs.append({
-                    "content": doc.page_content[:300],
+                    "content": content,
                     "source": source
                 })
                 seen.add(source)

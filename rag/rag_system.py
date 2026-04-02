@@ -10,7 +10,11 @@ from langchain_experimental.text_splitter import SemanticChunker
 from langchain_community.retrievers import BM25Retriever
 from langchain_classic.retrievers import EnsembleRetriever
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
-from query_processor import QueryProcessor
+from query import AcademicQueryService
+try:
+    from llm_factory import create_default_llm
+except ImportError:
+    from .llm_factory import create_default_llm
 import torch
 import os
 import glob
@@ -27,61 +31,21 @@ class RAGSystem:
         self.vectorstore = None
         self.retriever = None
         self.rag_chain = None
-        self.query_processor = None
+        self.query_service = None
 
     def setup_llm(self, model_path="../llm/DeepSeek-R1-0528-Qwen3-8B"):
         """设置语言模型"""
-        """使用 vLLM 加速推理"""
-        print("正在使用 vLLM 加载语言模型...")
-
-        try:
-            from langchain_openai import ChatOpenAI
-            # from langchain_community.llms import VLLM
-
-            self.llm = ChatOpenAI(
-                model="../llm/DeepSeek-R1-0528-Qwen3-8B",
-                openai_api_base="http://localhost:8001/v1",
-                openai_api_key="EMPTY",
-                max_tokens=2048,
-                temperature=0.3,
-                top_p=0.9,
-            )
-
-            print("vLLM 语言模型加载完成")
-
-        except Exception as e:
-            print("vLLM 加载失败，回退到原始加载方式")
-            tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_path,
-                dtype=torch.float16,
-                device_map="auto",
-                low_cpu_mem_usage=True,
-                trust_remote_code=True
-            )
-
-            pipe = pipeline(
-                "text-generation",
-                model=model,
-                tokenizer=tokenizer,
-                max_new_tokens=2048,
-                temperature=0.3,
-                top_p=0.9,
-                repetition_penalty=1.1,
-                do_sample=True,
-                pad_token_id=tokenizer.eos_token_id
-            )
-
-            self.llm = HuggingFacePipeline(pipeline=pipe)
+        print("正在加载 DashScope qwen-plus 语言模型...")
+        self.llm = create_default_llm()
         print("语言模型加载完成")
 
         # 初始化查询处理器
-        self.setup_query_processor()
+        self.setup_query_service()
 
-    def setup_query_processor(self):
+    def setup_query_service(self):
         """设置查询处理器"""
         print("正在初始化查询处理器...")
-        self.query_processor = QueryProcessor(self.llm)
+        self.query_service = AcademicQueryService(self.llm)
         print("查询处理器初始化完成")
 
     def setup_embeddings(self, embedding_model_path="/root/.cache/modelscope/hub/models/BAAI/bge-m3"):
@@ -415,71 +379,45 @@ class RAGSystem:
         )
 
     def enhanced_ask_question(self, question, show_docs=True):
-        """增强的问题回答方法，包含查询分解和文档评估"""
-        print("正在处理复杂查询...")
+        """增强的问题回答方法，使用单查询 QueryPlan 进行检索与回答。"""
+        print("正在处理单查询学术检索...")
 
-        # 1. 查询分解
-        sub_questions = self.query_processor.decompose_query(question)
-        print(f"分解为 {len(sub_questions)} 个子问题")
+        plan = self.query_service.build_query_plan(question)
+        search_query = plan.retrieval_query_zh or question
+        relevant_docs = self.retriever.invoke(search_query)
 
-        all_relevant_docs = []
-        answers = []
-
-        # 2. 对每个子问题进行处理
-        for i, sub_q in enumerate(sub_questions, 1):
-            print(f"\n处理子问题 {i}: {sub_q}")
-
-            # 检索文档
-            relevant_docs = self.retriever.invoke(sub_q)
-            if not relevant_docs:
-                print("未检索到相关文档")
-                continue
-
-            # 文档相关性评估
-            filtered_docs = []
-            for doc in relevant_docs:
-                is_relevant = self.query_processor.grade_document(
-                    doc.page_content, sub_q
-                )
-                if is_relevant:
-                    filtered_docs.append(doc)
-
-            if filtered_docs:
-                all_relevant_docs.extend(filtered_docs)
-
-                # 生成子答案
-                context = "\n\n".join([doc.page_content for doc in filtered_docs])
-                sub_answer = self.query_processor.generate_answer(context, sub_q)
-                answers.append(f"子问题 {i}: {sub_q}\n答案: {sub_answer}")
-
-            if show_docs:
-                print(f"检索到 {len(filtered_docs)} 个相关文档")
-                for j, doc in enumerate(filtered_docs, 1):
+        if show_docs:
+            if relevant_docs:
+                print(f"检索到 {len(relevant_docs)} 个相关文档:")
+                for j, doc in enumerate(relevant_docs, 1):
                     source = doc.metadata.get('source', '未知文件')
                     content_preview = doc.page_content.replace('\n', ' ')[:120]
                     print(f"   文档 {j} [{source}]: {content_preview}...")
+            else:
+                print("未检索到相关文档")
 
-        # 3. 综合所有答案
-        if answers:
-            final_context = "\n\n".join([doc.page_content for doc in all_relevant_docs])
-            combined_answer = self.query_processor.generate_answer(final_context, question)
+        if not relevant_docs:
+            return self.ask_question(question, show_docs=show_docs, use_enhanced=False)
 
-            # 添加子问题答案作为参考
-            detailed_answer = f"{combined_answer}\n\n=== 详细分析 ===\n" + "\n\n".join(answers)
-            return detailed_answer, all_relevant_docs
-        else:
-            # 如果没有找到相关文档，使用原始方法
-            return self.ask_question(question, show_docs,use_enhanced=False)
+        context = "\n\n".join([doc.page_content for doc in relevant_docs])
+        answer = self.query_service.generate_answer(context, question)
+        return answer, relevant_docs
 
     def ask_question(self, question, show_docs=True, use_enhanced=True):
         """回答问题"""
-        if use_enhanced and self.query_processor:
+        if use_enhanced and self.query_service:
             return self.enhanced_ask_question(question, show_docs)
 
         # 原始逻辑保持不变
         try:
             if show_docs:
-                relevant_docs = self.retriever.invoke(question)
+                search_query = question
+                if self.query_service:
+                    try:
+                        search_query = self.query_service.build_query_plan(question).retrieval_query_zh or question
+                    except Exception:
+                        search_query = question
+                relevant_docs = self.retriever.invoke(search_query)
                 if relevant_docs:
                     print(f"检索到 {len(relevant_docs)} 个相关文档:")
                     for j, doc in enumerate(relevant_docs, 1):
