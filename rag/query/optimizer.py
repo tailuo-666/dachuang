@@ -111,7 +111,7 @@ class AcademicQueryPlanner:
 4. retrieval_query_en 用于英文语义检索，要忠实表达原问题语义，不做逐词直译。
 5. crawler_query_en 用于 arXiv 标题/摘要搜索，要更像学术搜索串，优先核心术语和研究对象。
 6. keywords_zh 与 keywords_en 要去重、按重要性排序。
-7. required_aspects 是“本次检索应该覆盖的文档角度”，必须是英文短语列表，最多 5 个，按重要性排序。
+7. required_aspects 是“本次检索应该覆盖的文档角度”，必须是英文名词短语列表（noun phrase and NOT sentences），最多 5 个，按重要性排序。
 8. required_aspects 要可检索、可判断，不要写成空泛目标；优先“定义/机制/差异/原因/证据”这类角度。
 9. 对于比较类问题（如 A 为什么比 B 好），required_aspects 优先包含：
    - A 是什么
@@ -131,7 +131,10 @@ class AcademicQueryPlanner:
 13. keywords_en 必须尽量输出可检索的学术短语，不要变成单词袋。优先输出 machine learning、query rewriting、academic retrieval、question answering 这种短语。
 14. crawler_query_en 比 retrieval_query_en 更短、更像搜索串，尽量去掉 how, improve, use, study 这类弱信息词，保留研究对象、任务、方法和约束。
 15. 如果用户原问题已经足够精准，也仍然要给出英文查询。
-16. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+16. 在生成所有字段时，优先使用：
+  - arXiv 常见术语
+  - ACL / NeurIPS 论文标题风格
+17. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
 
 Few-shot 示例 1：
 用户问题：
@@ -146,7 +149,10 @@ Few-shot 示例 1：
   "crawler_query_en": "machine learning academic paper recommendation recommender systems",
   "keywords_zh": ["机器学习", "学术论文推荐", "推荐系统"],
   "keywords_en": ["machine learning", "academic paper recommendation", "recommender systems"],
-  "required_aspects": ["机器学习是什么", "学术论文推荐任务定义", "机器学习用于论文推荐的方法", "推荐效果评估指标"]
+  "required_aspects": ["definition of machine learning", 
+  "academic paper recommendation task",
+  "machine learning methods for recommendation",
+  "evaluation metrics for recommender systems"]
 }}
 
 Few-shot 示例 2：
@@ -162,7 +168,10 @@ Transformer 为什么比 RNN 好？
   "crawler_query_en": "Transformer RNN differences advantages",
   "keywords_zh": ["Transformer", "RNN", "区别", "优势"],
   "keywords_en": ["Transformer", "RNN", "differences", "advantages"],
-  "required_aspects": ["Transformer是什么", "RNN是什么", "两者区别", "Transformer更好的原因"]
+  "required_aspects": ["definition of Transformer",
+  "definition of RNN",
+  "differences between Transformer and RNN",
+  "advantages of Transformer over RNN"]
 }}
 
 Few-shot 示例 3：
@@ -178,7 +187,10 @@ Few-shot 示例 3：
   "crawler_query_en": "knowledge graph large language model question answering",
   "keywords_zh": ["知识图谱", "大语言模型", "问答"],
   "keywords_en": ["knowledge graph", "large language model", "question answering"],
-  "required_aspects": ["知识图谱是什么", "大语言模型是什么", "知识图谱与大语言模型结合方式", "问答任务中的优势与局限"]
+  "required_aspects": ["definition of knowledge graph",
+  "definition of large language model",
+  "integration methods of knowledge graph and large language model",
+  "advantages and limitations in question answering"]
 }}
 
 用户问题：
