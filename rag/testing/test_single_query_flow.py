@@ -63,14 +63,7 @@ class QueryPlannerTests(unittest.TestCase):
           "retrieval_query_en": "optimize Chinese academic RAG retrieval relevance evaluation",
           "crawler_query_en": "Chinese academic RAG retrieval query optimization relevance evaluation",
           "keywords_zh": ["中文学术RAG", "检索", "相关性评估"],
-          "keywords_en": ["Chinese academic RAG", "retrieval", "relevance evaluation"],
-          "term_replacements": [
-            {
-              "original_term": "RAG",
-              "normalized_term_zh": "检索增强生成",
-              "academic_term_en": "retrieval augmented generation"
-            }
-          ]
+          "keywords_en": ["Chinese academic RAG", "retrieval", "relevance evaluation"]
         }
         """
         planner = AcademicQueryPlanner(FakeLLM(fake_json))
@@ -88,8 +81,7 @@ class QueryPlannerTests(unittest.TestCase):
           "retrieval_query_en": "RAG query rewriting for improving academic retrieval quality",
           "crawler_query_en": "RAG query rewriting academic retrieval quality",
           "keywords_zh": ["RAG", "query rewriting", "academic retrieval"],
-          "keywords_en": ["RAG", "query rewriting", "academic retrieval"],
-          "term_replacements": []
+          "keywords_en": ["RAG", "query rewriting", "academic retrieval"]
         }
         """
         planner = AcademicQueryPlanner(FakeLLM(fake_json))
@@ -108,7 +100,6 @@ class RetrievalEvaluationTests(unittest.TestCase):
             crawler_query_en="academic RAG retrieval query optimization relevance evaluation",
             keywords_zh=["学术RAG", "检索", "查询优化", "相关性评估"],
             keywords_en=["academic RAG", "retrieval", "query optimization", "relevance evaluation"],
-            term_replacements=[],
         )
 
     def test_sufficient_retrieval_skips_crawler(self):
@@ -149,8 +140,7 @@ class MiddlewareFilteringTests(unittest.TestCase):
           "retrieval_query_en": "academic RAG retrieval query optimization",
           "crawler_query_en": "academic RAG retrieval query optimization",
           "keywords_zh": ["学术RAG", "检索", "查询优化"],
-          "keywords_en": ["academic RAG", "retrieval", "query optimization"],
-          "term_replacements": []
+          "keywords_en": ["academic RAG", "retrieval", "query optimization"]
         }
         """
         self.middleware = AcademicResearchMiddleware(

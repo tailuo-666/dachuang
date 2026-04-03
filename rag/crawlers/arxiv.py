@@ -383,7 +383,3 @@ class ArxivCrawlerIntegrated:
 
         print(f"\n下载完成！成功下载 {success_count}/{len(papers)} 篇论文")
         return success_count
-
-
-def create_arxiv_crawler_integrated(output_dir: str = "./paper_results") -> ArxivCrawlerIntegrated:
-    return ArxivCrawlerIntegrated(output_dir)

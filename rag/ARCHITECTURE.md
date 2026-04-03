@@ -55,7 +55,7 @@ rag/
 - 将用户原始问题转成单一的学术查询计划
 - 生成中英文检索语句
 - 提取中英文关键词
-- 做术语规范化和翻译映射
+- 做术语规范化
 
 核心数据结构：
 
@@ -70,7 +70,6 @@ rag/
 - `crawler_query_en`
 - `keywords_zh`
 - `keywords_en`
-- `term_replacements`
 
 说明：
 
@@ -171,7 +170,6 @@ middleware 的作用：
 
 当前共享模型包括：
 
-- `TermReplacement`
 - `AcademicQueryPlan`
 - `NormalizedDocument`
 - `RetrievalPayload`

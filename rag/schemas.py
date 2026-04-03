@@ -8,14 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from typing_extensions import NotRequired
 
 
-class TermReplacement(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    original_term: str = Field(default="")
-    normalized_term_zh: str = Field(default="")
-    academic_term_en: str = Field(default="")
-
-
 class AcademicQueryPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -26,7 +18,6 @@ class AcademicQueryPlan(BaseModel):
     crawler_query_en: str
     keywords_zh: list[str] = Field(default_factory=list)
     keywords_en: list[str] = Field(default_factory=list)
-    term_replacements: list[TermReplacement] = Field(default_factory=list)
 
 
 class NormalizedDocument(BaseModel):
@@ -94,4 +85,3 @@ class ResearchState(AgentState[dict[str, Any]]):
     crawl_required: NotRequired[Annotated[bool, OmitFromInput]]
     crawl_used: NotRequired[Annotated[bool, OmitFromInput]]
     final_sources: NotRequired[Annotated[list[dict[str, Any]], OmitFromInput]]
-

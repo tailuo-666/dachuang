@@ -7,9 +7,9 @@ from typing import Any
 from langchain_core.prompts import ChatPromptTemplate
 
 try:
-    from ..schemas import AcademicQueryPlan, TermReplacement
+    from ..schemas import AcademicQueryPlan
 except ImportError:
-    from schemas import AcademicQueryPlan, TermReplacement
+    from schemas import AcademicQueryPlan
 
 
 COMMON_TRANSLATIONS = {
@@ -93,14 +93,7 @@ class AcademicQueryPlanner:
   "retrieval_query_en": "...",
   "crawler_query_en": "...",
   "keywords_zh": ["..."],
-  "keywords_en": ["..."],
-  "term_replacements": [
-    {{
-      "original_term": "...",
-      "normalized_term_zh": "...",
-      "academic_term_en": "..."
-    }}
-  ]
+  "keywords_en": ["..."]
 }}
 
 规则：
@@ -110,9 +103,8 @@ class AcademicQueryPlanner:
 4. retrieval_query_en 用于英文语义检索，要忠实表达原问题语义，不做逐词直译。
 5. crawler_query_en 用于 arXiv 标题/摘要搜索，要更像学术搜索串，优先核心术语和研究对象。
 6. keywords_zh 与 keywords_en 要去重、按重要性排序。
-7. term_replacements 只保留真正需要规范化或翻译对齐的术语。
-8. 如果用户原问题已经足够精准，也仍然要给出英文查询和术语映射。
-9. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+7. 如果用户原问题已经足够精准，也仍然要给出英文查询。
+8. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
 
 用户问题：
 {question}
@@ -154,17 +146,6 @@ class AcademicQueryPlanner:
     def _coerce_plan(self, original_query: str, data: dict[str, Any]) -> AcademicQueryPlan:
         keywords_zh = self._normalize_string_list(data.get("keywords_zh"))
         keywords_en = self._normalize_string_list(data.get("keywords_en"))
-        replacements = []
-        for item in data.get("term_replacements", []):
-            if not isinstance(item, dict):
-                continue
-            replacements.append(
-                TermReplacement(
-                    original_term=str(item.get("original_term", "")).strip(),
-                    normalized_term_zh=str(item.get("normalized_term_zh", "")).strip(),
-                    academic_term_en=str(item.get("academic_term_en", "")).strip(),
-                )
-            )
 
         if not keywords_zh:
             keywords_zh = self._extract_keywords_zh(original_query)
@@ -179,7 +160,6 @@ class AcademicQueryPlanner:
             crawler_query_en=str(data.get("crawler_query_en") or " ".join(keywords_en)).strip(),
             keywords_zh=keywords_zh,
             keywords_en=keywords_en,
-            term_replacements=replacements,
         )
         if not plan.normalized_query_zh:
             plan.normalized_query_zh = original_query
@@ -194,14 +174,6 @@ class AcademicQueryPlanner:
     def _fallback_plan(self, original_query: str) -> AcademicQueryPlan:
         keywords_zh = self._extract_keywords_zh(original_query)
         keywords_en = self._translate_keywords(keywords_zh, original_query)
-        replacements = [
-            TermReplacement(
-                original_term=keyword,
-                normalized_term_zh=keyword,
-                academic_term_en=self._translate_term(keyword),
-            )
-            for keyword in keywords_zh[:6]
-        ]
         return AcademicQueryPlan(
             original_query=original_query,
             normalized_query_zh=original_query,
@@ -210,7 +182,6 @@ class AcademicQueryPlanner:
             crawler_query_en=" ".join(keywords_en) or original_query,
             keywords_zh=keywords_zh,
             keywords_en=keywords_en,
-            term_replacements=replacements,
         )
 
     def _extract_keywords_zh(self, query: str) -> list[str]:
