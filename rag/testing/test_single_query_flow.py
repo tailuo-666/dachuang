@@ -11,7 +11,7 @@ try:
     from rag.rag_system import RAGSystem
     from rag.retrieval.evaluator import evaluate_retrieval
     from rag.schemas import AcademicQueryPlan, NormalizedDocument
-    from rag.testing.fixtures import fake_crawl_papers, retrieval_docs_high_match, retrieval_docs_low_match
+    from rag.testing.fixtures import fake_crawl_papers
 except ImportError:
     from agent.middleware import AcademicResearchMiddleware
     from crawlers.arxiv import ArxivCrawlerIntegrated
@@ -19,7 +19,7 @@ except ImportError:
     from rag_system import RAGSystem
     from retrieval.evaluator import evaluate_retrieval
     from schemas import AcademicQueryPlan, NormalizedDocument
-    from testing.fixtures import fake_crawl_papers, retrieval_docs_high_match, retrieval_docs_low_match
+    from testing.fixtures import fake_crawl_papers
 
 
 class FakeLLMResponse:
@@ -47,12 +47,11 @@ class DummyRequest:
         self.system_message = system_message
 
     def override(self, **kwargs):
-        cloned = DummyRequest(
+        return DummyRequest(
             state=kwargs.get("state", self.state),
             tools=kwargs.get("tools", self.tools),
             system_message=kwargs.get("system_message", self.system_message),
         )
-        return cloned
 
 
 class DummyLangChainDoc:
@@ -66,8 +65,8 @@ class QueryPlannerTests(unittest.TestCase):
         fake_json = """
         {
           "original_query": "如何优化中文学术RAG检索？",
-          "normalized_query_zh": "如何优化中文学术 RAG 检索与相关性评估？",
-          "retrieval_query_zh": "中文学术 RAG 检索 查询优化 相关性评估",
+          "normalized_query_zh": "如何优化中文学术RAG检索与相关性评估？",
+          "retrieval_query_zh": "中文 学术 RAG 检索 查询优化 相关性评估",
           "retrieval_query_en": "optimize Chinese academic RAG retrieval relevance evaluation",
           "crawler_query_en": "Chinese academic RAG retrieval query optimization relevance evaluation",
           "keywords_zh": ["中文学术RAG", "检索", "相关性评估"],
@@ -128,24 +127,114 @@ class QueryPlannerTests(unittest.TestCase):
 class RetrievalEvaluationTests(unittest.TestCase):
     def setUp(self):
         self.plan = AcademicQueryPlan(
-            original_query="如何优化学术RAG检索？",
-            normalized_query_zh="如何优化学术RAG检索？",
-            retrieval_query_zh="学术 RAG 检索 查询优化 相关性评估",
-            retrieval_query_en="academic RAG retrieval query optimization relevance evaluation",
-            crawler_query_en="academic RAG retrieval query optimization relevance evaluation",
-            keywords_zh=["学术RAG", "检索", "查询优化", "相关性评估"],
-            keywords_en=["academic RAG", "retrieval", "query optimization", "relevance evaluation"],
+            original_query="Why does Transformer outperform RNN?",
+            normalized_query_zh="为什么 Transformer 优于 RNN？",
+            retrieval_query_zh="Transformer RNN 区别 优势 原因",
+            retrieval_query_en="why Transformer outperforms RNN",
+            crawler_query_en="Transformer RNN differences advantages",
+            keywords_zh=["Transformer", "RNN", "区别", "优势"],
+            keywords_en=["Transformer", "RNN", "differences", "advantages"],
+            required_aspects=[
+                "definition of Transformer",
+                "definition of RNN",
+                "differences between Transformer and RNN",
+                "advantages of Transformer over RNN",
+            ],
         )
 
     def test_sufficient_retrieval_skips_crawler(self):
-        result = evaluate_retrieval(self.plan, retrieval_docs_high_match())
+        docs = [
+            {
+                "content": "Definition of Transformer architecture and self-attention mechanism.",
+                "source": "doc_transformer.md",
+                "metadata": {"title": "Transformer Definition"},
+            },
+            {
+                "content": "Definition of recurrent neural network (RNN) with sequence modeling basics.",
+                "source": "doc_rnn.md",
+                "metadata": {"title": "RNN Definition"},
+            },
+            {
+                "content": (
+                    "Differences between Transformer and RNN include parallel computation, "
+                    "long-range dependency handling, and better training efficiency."
+                ),
+                "source": "doc_diff.md",
+                "metadata": {"title": "Transformer vs RNN"},
+            },
+            {
+                "content": (
+                    "Advantages of Transformer over RNN are stronger scalability and "
+                    "improved performance in large-scale sequence tasks."
+                ),
+                "source": "doc_adv.md",
+                "metadata": {"title": "Advantages"},
+            },
+        ]
+        result = evaluate_retrieval(self.plan, docs)
         self.assertTrue(result.sufficient)
-        self.assertGreaterEqual(result.top1_coverage, 0.60)
+        self.assertEqual(result.next_action, "answer")
+        self.assertGreaterEqual(result.aspect_coverage, 0.75)
+        self.assertGreaterEqual(result.support_strength, 0.60)
+        self.assertLessEqual(result.noise_ratio, 0.40)
+        self.assertGreaterEqual(len(result.covered_aspects), 3)
 
-    def test_insufficient_retrieval_requires_crawler(self):
-        result = evaluate_retrieval(self.plan, retrieval_docs_low_match())
+    def test_combined_support_can_cover_aspect(self):
+        plan = self.plan.model_copy(
+            update={
+                "required_aspects": ["advantages of Transformer over RNN"],
+                "keywords_en": ["Transformer", "RNN", "advantages"],
+            }
+        )
+        docs = [
+            {
+                "content": "Transformer has strong advantages in parallel training and long context.",
+                "source": "doc_part_a.md",
+                "metadata": {"title": "Transformer strengths"},
+            },
+            {
+                "content": "Compared with RNN, performance improves on sequence benchmarks.",
+                "source": "doc_part_b.md",
+                "metadata": {"title": "RNN comparison"},
+            },
+        ]
+        result = evaluate_retrieval(plan, docs)
+        self.assertIn("advantages of Transformer over RNN", result.covered_aspects)
+        self.assertLess(result.support_strength, 0.60)
         self.assertFalse(result.sufficient)
-        self.assertLess(result.top1_coverage, 0.60)
+
+    def test_high_noise_prefers_retrieve_more(self):
+        docs = [
+            {
+                "content": "This paper discusses image compression and video codecs only.",
+                "source": "noise_1.md",
+                "metadata": {"title": "Compression Survey"},
+            },
+            {
+                "content": "An unrelated benchmark on audio denoising models.",
+                "source": "noise_2.md",
+                "metadata": {"title": "Audio Denoising"},
+            },
+        ]
+        result = evaluate_retrieval(self.plan, docs)
+        self.assertFalse(result.sufficient)
+        self.assertEqual(result.next_action, "retrieve_more")
+        self.assertGreater(result.noise_ratio, 0.70)
+        self.assertGreaterEqual(len(result.missing_aspects), 1)
+
+    def test_legacy_debug_metrics_are_kept(self):
+        docs = [
+            {
+                "content": "Definition of Transformer and RNN.",
+                "source": "doc_legacy.md",
+                "metadata": {"title": "Legacy Metrics"},
+            }
+        ]
+        result = evaluate_retrieval(self.plan, docs)
+        payload = result.model_dump()
+        self.assertIn("top1_coverage", payload)
+        self.assertIn("avg_top3_coverage", payload)
+        self.assertIn("unique_sources", payload)
 
 
 class ArxivCrawlerTests(unittest.TestCase):
@@ -175,7 +264,8 @@ class MiddlewareFilteringTests(unittest.TestCase):
           "retrieval_query_en": "academic RAG retrieval query optimization",
           "crawler_query_en": "academic RAG retrieval query optimization",
           "keywords_zh": ["学术RAG", "检索", "查询优化"],
-          "keywords_en": ["academic RAG", "retrieval", "query optimization"]
+          "keywords_en": ["academic RAG", "retrieval", "query optimization"],
+          "required_aspects": ["RAG definition", "retrieval workflow"]
         }
         """
         self.middleware = AcademicResearchMiddleware(
@@ -198,11 +288,36 @@ class MiddlewareFilteringTests(unittest.TestCase):
         result = self.middleware.wrap_model_call(request, handler)
         self.assertEqual([tool.name for tool in result.tools], ["retrieve_local_kb"])
 
+    def test_wrap_model_call_allows_retrieve_more_once(self):
+        request = DummyRequest(
+            state={
+                "query_plan": {},
+                "retrieval_result": {"status": "success"},
+                "retrieval_sufficient": False,
+                "retrieval_next_action": "retrieve_more",
+                "retrieval_retry_count": 0,
+                "crawl_required": False,
+                "crawl_used": False,
+                "messages": [],
+            },
+            tools=self.tools,
+            system_message=SystemMessage(content="base"),
+        )
+
+        def handler(inner_request):
+            return inner_request
+
+        result = self.middleware.wrap_model_call(request, handler)
+        self.assertEqual([tool.name for tool in result.tools], ["retrieve_local_kb"])
+
     def test_wrap_model_call_enables_crawler_when_needed(self):
         request = DummyRequest(
             state={
                 "query_plan": {},
                 "retrieval_result": {"status": "success"},
+                "retrieval_sufficient": False,
+                "retrieval_next_action": "crawl_more",
+                "retrieval_retry_count": 1,
                 "crawl_required": True,
                 "crawl_used": False,
                 "messages": [],
@@ -221,13 +336,14 @@ class MiddlewareFilteringTests(unittest.TestCase):
 class HybridRetrievalTests(unittest.TestCase):
     def setUp(self):
         self.plan = AcademicQueryPlan(
-            original_query="如何优化学术RAG检索？",
-            normalized_query_zh="如何优化学术RAG检索？",
+            original_query="How to improve academic retrieval?",
+            normalized_query_zh="如何优化学术检索？",
             retrieval_query_zh="中文 检索 查询",
             retrieval_query_en="academic retrieval query",
             crawler_query_en="academic retrieval query",
-            keywords_zh=["学术RAG", "检索"],
+            keywords_zh=["学术检索", "BM25"],
             keywords_en=["academic retrieval", "BM25"],
+            required_aspects=["definition of academic retrieval"],
         )
 
     def test_bm25_query_uses_english_query_and_keywords_only(self):
