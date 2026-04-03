@@ -14,6 +14,9 @@ except ImportError:
 
 COMMON_TRANSLATIONS = {
     "检索增强生成": "retrieval augmented generation",
+    "机器学习": "machine learning",
+    "深度学习": "deep learning",
+    "强化学习": "reinforcement learning",
     "向量数据库": "vector database",
     "向量检索": "vector retrieval",
     "多模态": "multimodal",
@@ -22,6 +25,9 @@ COMMON_TRANSLATIONS = {
     "大语言模型": "large language model",
     "文档重排序": "document reranking",
     "相关性评估": "relevance evaluation",
+    "信息检索": "information retrieval",
+    "问答系统": "question answering system",
+    "问答": "question answering",
     "学术搜索": "academic search",
     "论文爬虫": "paper crawler",
     "中文": "Chinese",
@@ -79,6 +85,7 @@ class AcademicQueryPlanner:
                     (
                         "你是学术研究场景下的查询优化专家。"
                         "你的任务是把用户的中文或中英混合问题，转成适合本地知识库检索与 arXiv 英文检索的单一查询计划。"
+                        "你必须理解学术术语、英文固定搭配、常见缩写和中英混合表达，优先使用学术界常见且稳定的术语表达。"
                         "不要拆分子问题，不要输出解释，只返回 JSON。"
                     ),
                 ),
@@ -103,8 +110,65 @@ class AcademicQueryPlanner:
 4. retrieval_query_en 用于英文语义检索，要忠实表达原问题语义，不做逐词直译。
 5. crawler_query_en 用于 arXiv 标题/摘要搜索，要更像学术搜索串，优先核心术语和研究对象。
 6. keywords_zh 与 keywords_en 要去重、按重要性排序。
-7. 如果用户原问题已经足够精准，也仍然要给出英文查询。
-8. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+7. 提取关键词时优先保留“术语短语”而不是拆成零散单词。例如：
+   - 机器学习 -> machine learning，不能拆成 machine 和 learning
+   - 深度学习 -> deep learning
+   - 强化学习 -> reinforcement learning
+   - 知识图谱 -> knowledge graph
+   - 信息检索 -> information retrieval
+   - 查询重写 -> query rewriting
+   - 大语言模型 -> large language model
+8. 如果用户问题里已经出现标准英文术语或公认缩写，优先保留并复用，例如 RAG、LLM、BM25、OCR、arXiv，不要改写成生造表达。
+9. 严禁机械翻译、按字面误译、按近音误译。像“机器学习”绝不能写成 mechanic learning；拿不准时，保留公认英文术语或原缩写，也不要发明新词。
+10. keywords_en 必须尽量输出可检索的学术短语，不要变成单词袋。优先输出 machine learning、query rewriting、academic retrieval、question answering 这种短语。
+11. crawler_query_en 比 retrieval_query_en 更短、更像搜索串，尽量去掉 how, improve, use, study 这类弱信息词，保留研究对象、任务、方法和约束。
+12. 如果用户原问题已经足够精准，也仍然要给出英文查询。
+13. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+
+Few-shot 示例 1：
+用户问题：
+机器学习如何用于学术论文推荐？
+
+输出：
+{{
+  "original_query": "机器学习如何用于学术论文推荐？",
+  "normalized_query_zh": "机器学习如何用于学术论文推荐与推荐系统优化？",
+  "retrieval_query_zh": "机器学习 学术论文推荐 推荐系统",
+  "retrieval_query_en": "how machine learning can be used for academic paper recommendation",
+  "crawler_query_en": "machine learning academic paper recommendation recommender systems",
+  "keywords_zh": ["机器学习", "学术论文推荐", "推荐系统"],
+  "keywords_en": ["machine learning", "academic paper recommendation", "recommender systems"]
+}}
+
+Few-shot 示例 2：
+用户问题：
+RAG query rewriting 怎么提升 academic retrieval？
+
+输出：
+{{
+"original_query": "大语言模型如何提升信息检索效果？",
+"normalized_query_zh": "大语言模型如何提升信息检索系统的效果与性能？",
+"retrieval_query_zh": "大语言模型 信息检索 检索效果 提升",
+"retrieval_query_en": "how large language models improve information retrieval performance",
+"crawler_query_en": "large language model information retrieval performance",
+"keywords_zh": ["大语言模型", "信息检索", "检索效果"],
+"keywords_en": ["large language model", "information retrieval", "retrieval performance"]
+}}
+
+Few-shot 示例 3：
+用户问题：
+知识图谱和大语言模型结合做问答有什么方法？
+
+输出：
+{{
+  "original_query": "知识图谱和大语言模型结合做问答有什么方法？",
+  "normalized_query_zh": "知识图谱与大语言模型结合进行问答的方法有哪些？",
+  "retrieval_query_zh": "知识图谱 大语言模型 问答 方法",
+  "retrieval_query_en": "methods for combining knowledge graph and large language model for question answering",
+  "crawler_query_en": "knowledge graph large language model question answering",
+  "keywords_zh": ["知识图谱", "大语言模型", "问答"],
+  "keywords_en": ["knowledge graph", "large language model", "question answering"]
+}}
 
 用户问题：
 {question}

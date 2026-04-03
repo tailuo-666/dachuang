@@ -6,11 +6,11 @@ from langchain_core.tools import tool
 
 try:
     from ..crawlers.arxiv import ArxivCrawlerIntegrated
-    from ..schemas import NormalizedDocument, RetrievalPayload
+    from ..schemas import AcademicQueryPlan, NormalizedDocument, RetrievalPayload
     from .runtime import context, get_pdf_processor, get_rag_system, log_progress
 except ImportError:
     from crawlers.arxiv import ArxivCrawlerIntegrated
-    from schemas import NormalizedDocument, RetrievalPayload
+    from schemas import AcademicQueryPlan, NormalizedDocument, RetrievalPayload
     from agent.runtime import context, get_pdf_processor, get_rag_system, log_progress
 
 
@@ -42,13 +42,49 @@ def _normalize_langchain_doc(doc) -> NormalizedDocument:
     )
 
 
+def _build_runtime_query_plan(search_query: str) -> AcademicQueryPlan:
+    query_plan_raw = context.query_plan or {}
+    if query_plan_raw:
+        try:
+            return AcademicQueryPlan(**query_plan_raw)
+        except Exception:
+            pass
+
+    fallback_query = str(search_query or "").strip()
+    return AcademicQueryPlan(
+        original_query=fallback_query,
+        normalized_query_zh=fallback_query,
+        retrieval_query_zh=fallback_query,
+        retrieval_query_en=fallback_query,
+        crawler_query_en=fallback_query,
+        keywords_zh=[],
+        keywords_en=[],
+    )
+
+
+def _build_retrieval_message(debug: dict[str, Any], returned_count: int) -> str:
+    branch_counts = debug.get("branch_counts", {})
+    return (
+        "本地混合检索完成: "
+        f"BM25={branch_counts.get('bm25_en', 0)}, "
+        f"Dense-ZH={branch_counts.get('dense_zh', 0)}, "
+        f"Dense-EN={branch_counts.get('dense_en', 0)}, "
+        f"RRF top20={debug.get('rrf_pool_count', 0)}, "
+        f"返回={returned_count}"
+    )
+
+
 @tool
 def retrieve_local_kb(search_query: str) -> str:
     """Retrieve documents from the local academic knowledge base. Always use this tool first."""
     rag_system = get_rag_system()
     log_progress(f"正在检索本地知识库: {search_query}")
 
-    if rag_system is None or getattr(rag_system, "retriever", None) is None:
+    if (
+        rag_system is None
+        or getattr(rag_system, "vectorstore", None) is None
+        or not hasattr(rag_system, "retrieve_with_query_plan")
+    ):
         payload = RetrievalPayload(
             status="error",
             message="RAG系统未初始化，无法执行本地检索。",
@@ -59,11 +95,11 @@ def retrieve_local_kb(search_query: str) -> str:
         return payload.model_dump_json()
 
     try:
-        docs = rag_system.retriever.invoke(search_query)
-        normalized_docs = [_normalize_langchain_doc(doc) for doc in docs[:6]]
+        query_plan = _build_runtime_query_plan(search_query)
+        normalized_docs, debug = rag_system.retrieve_with_query_plan(query_plan, final_top_k=5)
         payload = RetrievalPayload(
             status="success",
-            message=f"本地知识库返回 {len(normalized_docs)} 条候选文档。",
+            message=_build_retrieval_message(debug, len(normalized_docs)),
             query=search_query,
             doc_count=len(normalized_docs),
             docs=normalized_docs,
@@ -110,13 +146,19 @@ def crawl_academic_sources(query_en: str, keywords_en: list[str]) -> str:
                 processed = pdf_processor.process_pdf_folder("./paper_results")
                 if processed:
                     rag_system.update_rag_system()
-                    refreshed_docs = rag_system.retriever.invoke(query_en)
-                    indexed_doc_count = len(refreshed_docs[:3])
-                    refreshed_normalized = [_normalize_langchain_doc(doc) for doc in refreshed_docs[:3]]
+                    refreshed_plan = _build_runtime_query_plan(query_en)
+                    refreshed_normalized, debug = rag_system.retrieve_with_query_plan(
+                        refreshed_plan,
+                        final_top_k=5,
+                    )
+                    indexed_doc_count = len(refreshed_normalized)
                     if refreshed_normalized:
                         payload = payload.model_copy(
                             update={
-                                "message": f"{payload.message} 已下载 {downloaded_count} 篇论文并刷新知识库。",
+                                "message": (
+                                    f"{payload.message} 已下载{downloaded_count} 篇论文并刷新知识库。"
+                                    f"{_build_retrieval_message(debug, len(refreshed_normalized))}"
+                                ),
                                 "evidence_docs": refreshed_normalized,
                                 "downloaded_count": downloaded_count,
                                 "indexed_doc_count": indexed_doc_count,
