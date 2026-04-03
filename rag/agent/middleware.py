@@ -200,6 +200,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             f"- crawler_query_en: {query_plan.crawler_query_en}\n"
             f"- keywords_zh: {query_plan.keywords_zh}\n"
             f"- keywords_en: {query_plan.keywords_en}\n"
+            f"- required_aspects: {query_plan.required_aspects}\n"
             f"- relevance_reason: {relevance_reason or '尚未评估'}\n"
             f"- workflow_constraint: {stage_hint}\n"
             "回答必须基于工具返回的 JSON 证据，不允许凭空补写。"
@@ -218,4 +219,3 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                     return " ".join(parts).strip()
                 return str(message.content).strip()
         return ""
-

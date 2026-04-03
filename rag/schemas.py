@@ -18,6 +18,7 @@ class AcademicQueryPlan(BaseModel):
     crawler_query_en: str
     keywords_zh: list[str] = Field(default_factory=list)
     keywords_en: list[str] = Field(default_factory=list)
+    required_aspects: list[str] = Field(default_factory=list)
 
 
 class NormalizedDocument(BaseModel):

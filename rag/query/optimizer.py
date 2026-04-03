@@ -100,7 +100,8 @@ class AcademicQueryPlanner:
   "retrieval_query_en": "...",
   "crawler_query_en": "...",
   "keywords_zh": ["..."],
-  "keywords_en": ["..."]
+  "keywords_en": ["..."],
+  "required_aspects": ["..."]
 }}
 
 规则：
@@ -110,7 +111,14 @@ class AcademicQueryPlanner:
 4. retrieval_query_en 用于英文语义检索，要忠实表达原问题语义，不做逐词直译。
 5. crawler_query_en 用于 arXiv 标题/摘要搜索，要更像学术搜索串，优先核心术语和研究对象。
 6. keywords_zh 与 keywords_en 要去重、按重要性排序。
-7. 提取关键词时优先保留“术语短语”而不是拆成零散单词。例如：
+7. required_aspects 是“本次检索应该覆盖的文档角度”，必须是英文短语列表，最多 5 个，按重要性排序。
+8. required_aspects 要可检索、可判断，不要写成空泛目标；优先“定义/机制/差异/原因/证据”这类角度。
+9. 对于比较类问题（如 A 为什么比 B 好），required_aspects 优先包含：
+   - A 是什么
+   - B 是什么
+   - A 与 B 的区别
+   - A 更好的原因
+10. 提取关键词时优先保留“术语短语”而不是拆成零散单词。例如：
    - 机器学习 -> machine learning，不能拆成 machine 和 learning
    - 深度学习 -> deep learning
    - 强化学习 -> reinforcement learning
@@ -118,12 +126,12 @@ class AcademicQueryPlanner:
    - 信息检索 -> information retrieval
    - 查询重写 -> query rewriting
    - 大语言模型 -> large language model
-8. 如果用户问题里已经出现标准英文术语或公认缩写，优先保留并复用，例如 RAG、LLM、BM25、OCR、arXiv，不要改写成生造表达。
-9. 严禁机械翻译、按字面误译、按近音误译。像“机器学习”绝不能写成 mechanic learning；拿不准时，保留公认英文术语或原缩写，也不要发明新词。
-10. keywords_en 必须尽量输出可检索的学术短语，不要变成单词袋。优先输出 machine learning、query rewriting、academic retrieval、question answering 这种短语。
-11. crawler_query_en 比 retrieval_query_en 更短、更像搜索串，尽量去掉 how, improve, use, study 这类弱信息词，保留研究对象、任务、方法和约束。
-12. 如果用户原问题已经足够精准，也仍然要给出英文查询。
-13. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+11. 如果用户问题里已经出现标准英文术语或公认缩写，优先保留并复用，例如 RAG、LLM、BM25、OCR、arXiv，不要改写成生造表达。
+12. 严禁机械翻译、按字面误译、按近音误译。像“机器学习”绝不能写成 mechanic learning；拿不准时，保留公认英文术语或原缩写，也不要发明新词。
+13. keywords_en 必须尽量输出可检索的学术短语，不要变成单词袋。优先输出 machine learning、query rewriting、academic retrieval、question answering 这种短语。
+14. crawler_query_en 比 retrieval_query_en 更短、更像搜索串，尽量去掉 how, improve, use, study 这类弱信息词，保留研究对象、任务、方法和约束。
+15. 如果用户原问题已经足够精准，也仍然要给出英文查询。
+16. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
 
 Few-shot 示例 1：
 用户问题：
@@ -137,22 +145,24 @@ Few-shot 示例 1：
   "retrieval_query_en": "how machine learning can be used for academic paper recommendation",
   "crawler_query_en": "machine learning academic paper recommendation recommender systems",
   "keywords_zh": ["机器学习", "学术论文推荐", "推荐系统"],
-  "keywords_en": ["machine learning", "academic paper recommendation", "recommender systems"]
+  "keywords_en": ["machine learning", "academic paper recommendation", "recommender systems"],
+  "required_aspects": ["机器学习是什么", "学术论文推荐任务定义", "机器学习用于论文推荐的方法", "推荐效果评估指标"]
 }}
 
 Few-shot 示例 2：
 用户问题：
-RAG query rewriting 怎么提升 academic retrieval？
+Transformer 为什么比 RNN 好？
 
 输出：
 {{
-"original_query": "大语言模型如何提升信息检索效果？",
-"normalized_query_zh": "大语言模型如何提升信息检索系统的效果与性能？",
-"retrieval_query_zh": "大语言模型 信息检索 检索效果 提升",
-"retrieval_query_en": "how large language models improve information retrieval performance",
-"crawler_query_en": "large language model information retrieval performance",
-"keywords_zh": ["大语言模型", "信息检索", "检索效果"],
-"keywords_en": ["large language model", "information retrieval", "retrieval performance"]
+  "original_query": "Transformer 为什么比 RNN 好？",
+  "normalized_query_zh": "Transformer 相比 RNN 的优势来源是什么？",
+  "retrieval_query_zh": "Transformer RNN 区别 优势 原因",
+  "retrieval_query_en": "why Transformer outperforms RNN",
+  "crawler_query_en": "Transformer RNN differences advantages",
+  "keywords_zh": ["Transformer", "RNN", "区别", "优势"],
+  "keywords_en": ["Transformer", "RNN", "differences", "advantages"],
+  "required_aspects": ["Transformer是什么", "RNN是什么", "两者区别", "Transformer更好的原因"]
 }}
 
 Few-shot 示例 3：
@@ -167,7 +177,8 @@ Few-shot 示例 3：
   "retrieval_query_en": "methods for combining knowledge graph and large language model for question answering",
   "crawler_query_en": "knowledge graph large language model question answering",
   "keywords_zh": ["知识图谱", "大语言模型", "问答"],
-  "keywords_en": ["knowledge graph", "large language model", "question answering"]
+  "keywords_en": ["knowledge graph", "large language model", "question answering"],
+  "required_aspects": ["知识图谱是什么", "大语言模型是什么", "知识图谱与大语言模型结合方式", "问答任务中的优势与局限"]
 }}
 
 用户问题：
@@ -215,6 +226,11 @@ Few-shot 示例 3：
             keywords_zh = self._extract_keywords_zh(original_query)
         if not keywords_en:
             keywords_en = self._translate_keywords(keywords_zh, original_query)
+        required_aspects = self._normalize_required_aspects(
+            value=data.get("required_aspects"),
+            original_query=original_query,
+            keywords_zh=keywords_zh,
+        )
 
         plan = AcademicQueryPlan(
             original_query=original_query,
@@ -224,6 +240,7 @@ Few-shot 示例 3：
             crawler_query_en=str(data.get("crawler_query_en") or " ".join(keywords_en)).strip(),
             keywords_zh=keywords_zh,
             keywords_en=keywords_en,
+            required_aspects=required_aspects,
         )
         if not plan.normalized_query_zh:
             plan.normalized_query_zh = original_query
@@ -233,11 +250,14 @@ Few-shot 示例 3：
             plan.retrieval_query_en = " ".join(plan.keywords_en) or original_query
         if not plan.crawler_query_en:
             plan.crawler_query_en = plan.retrieval_query_en
+        if not plan.required_aspects:
+            plan.required_aspects = self._infer_required_aspects(original_query, plan.keywords_zh)
         return plan
 
     def _fallback_plan(self, original_query: str) -> AcademicQueryPlan:
         keywords_zh = self._extract_keywords_zh(original_query)
         keywords_en = self._translate_keywords(keywords_zh, original_query)
+        required_aspects = self._infer_required_aspects(original_query, keywords_zh)
         return AcademicQueryPlan(
             original_query=original_query,
             normalized_query_zh=original_query,
@@ -246,6 +266,7 @@ Few-shot 示例 3：
             crawler_query_en=" ".join(keywords_en) or original_query,
             keywords_zh=keywords_zh,
             keywords_en=keywords_en,
+            required_aspects=required_aspects,
         )
 
     def _extract_keywords_zh(self, query: str) -> list[str]:
@@ -309,3 +330,30 @@ Few-shot 示例 3：
             seen.add(key)
             cleaned.append(text)
         return cleaned
+
+    def _normalize_required_aspects(self, value: Any, original_query: str, keywords_zh: list[str]) -> list[str]:
+        aspects = self._normalize_string_list(value)[:5]
+        if aspects:
+            return aspects
+        return self._infer_required_aspects(original_query, keywords_zh)
+
+    def _infer_required_aspects(self, original_query: str, keywords_zh: list[str]) -> list[str]:
+        compare_pattern = re.compile(r"(为什么|为何|区别|对比|比较|优于|更好|优势|vs|VS|比)")
+        if len(keywords_zh) >= 2 and compare_pattern.search(original_query or ""):
+            left = keywords_zh[0]
+            right = keywords_zh[1]
+            return [
+                f"{left}是什么",
+                f"{right}是什么",
+                f"{left}与{right}的区别",
+                f"{left}更好的原因",
+            ][:5]
+
+        base = (original_query or "").strip().rstrip("？?!！。")
+        if not base:
+            return []
+        return [
+            f"{base}的核心定义",
+            f"{base}的关键方法",
+            f"{base}的评估指标",
+        ][:5]

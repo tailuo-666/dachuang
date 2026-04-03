@@ -70,11 +70,13 @@ rag/
 - `crawler_query_en`
 - `keywords_zh`
 - `keywords_en`
+- `required_aspects`
 
 说明：
 
 - `retrieval_query_zh` 用于本地知识库检索
 - `crawler_query_en` 和 `keywords_en` 用于学术站点爬虫
+- `required_aspects` 表示本次检索应覆盖的证据角度（最多 5 个）
 - 查询规划不是 agent 工具，而是在 agent 启动前由 middleware 注入
 
 ### 2. 检索与相关性评估
