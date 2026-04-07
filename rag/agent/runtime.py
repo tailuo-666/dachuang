@@ -25,31 +25,23 @@ class ResearchContext:
         self.original_query = ""
         self.query_plan: dict[str, Any] | None = None
         self.retrieval_result: dict[str, Any] | None = None
-        self.crawl_result: dict[str, Any] | None = None
-        self.papers: list[dict[str, Any]] = []
+        self.web_search_result: dict[str, Any] | None = None
+        self.final_evidence: dict[str, Any] | None = None
+        self.final_evidence_items: list[dict[str, Any]] = []
         self.current_missing_aspects: list[str] = []
-        self.pending_ingestion_job: dict[str, Any] | None = None
 
-    def set_sources(self, docs: list[dict[str, Any]]) -> None:
-        self.papers = [dict(doc) for doc in docs]
+    def set_final_evidence(self, bundle: dict[str, Any] | None) -> None:
+        self.final_evidence = copy.deepcopy(bundle) if bundle else None
+        evidence_items = []
+        if bundle:
+            evidence_items = [dict(item) for item in (bundle.get("all_evidence") or [])]
+        self.final_evidence_items = evidence_items
 
-    def extend_sources(self, docs: list[dict[str, Any]]) -> None:
-        existing = {str(doc.get("source", "")).strip(): dict(doc) for doc in self.papers}
-        for doc in docs:
-            key = str(doc.get("source", "")).strip() or str(doc.get("metadata", {}).get("pdf_link", "")).strip()
-            if not key:
-                key = f"source_{len(existing) + 1}"
-            existing[key] = dict(doc)
-        self.papers = list(existing.values())
+    def set_web_search_result(self, payload: dict[str, Any] | None) -> None:
+        self.web_search_result = copy.deepcopy(payload) if payload else None
 
     def set_current_missing_aspects(self, aspects: list[str] | None) -> None:
         self.current_missing_aspects = [str(item).strip() for item in (aspects or []) if str(item).strip()]
-
-    def set_pending_ingestion_job(self, job: dict[str, Any] | None) -> None:
-        self.pending_ingestion_job = copy.deepcopy(job) if job else None
-
-    def snapshot_pending_ingestion_job(self) -> dict[str, Any] | None:
-        return copy.deepcopy(self.pending_ingestion_job) if self.pending_ingestion_job else None
 
 
 context = ResearchContext()

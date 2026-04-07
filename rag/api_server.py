@@ -7,7 +7,6 @@ from pydantic import BaseModel
 
 from agent.builder import RagService
 from agent.runtime import context as research_context, init_runtime, set_progress_callback
-from agent.tools_impl import persist_pending_crawl_results
 from llm_factory import create_default_llm
 from pdf_processor import PDFProcessor
 from rag_system import setup_rag_system
@@ -59,7 +58,6 @@ def run_rag_task(task_id: str, question: str):
 
         agent_service = RagService()
         result = agent_service.run(query=question, thread_id=task_id)
-        pending_ingestion_job = research_context.snapshot_pending_ingestion_job()
 
         timeline_cb("Agent 执行完成，正在提取答案和来源。")
 
@@ -76,21 +74,26 @@ def run_rag_task(task_id: str, question: str):
 
         seen = set()
         formatted_docs = []
-        for doc in research_context.papers:
-            if hasattr(doc, "page_content"):
-                source = doc.metadata.get("source", "unknown")
-                content = doc.page_content[:300]
-            elif isinstance(doc, dict):
-                source = doc.get("source") or doc.get("metadata", {}).get("title") or "unknown"
-                content = str(doc.get("content", ""))[:300]
-            else:
+        for doc in research_context.final_evidence_items:
+            if not isinstance(doc, dict):
                 continue
 
-            if source in seen:
+            source = doc.get("source") or doc.get("title") or doc.get("url") or "unknown"
+            dedupe_key = doc.get("url") or source
+            if dedupe_key in seen:
                 continue
 
-            formatted_docs.append({"content": content, "source": source})
-            seen.add(source)
+            formatted_docs.append(
+                {
+                    "content": str(doc.get("content", ""))[:300],
+                    "source": source,
+                    "title": doc.get("title", ""),
+                    "url": doc.get("url", ""),
+                    "aspects": doc.get("aspects", []) or [],
+                    "origin": doc.get("origin", ""),
+                }
+            )
+            seen.add(dedupe_key)
 
         timeline_cb(f"提取到 {len(formatted_docs)} 个来源。")
 
@@ -99,15 +102,6 @@ def run_rag_task(task_id: str, question: str):
             "answer": final_answer or "Agent 未能生成有效答案",
             "sources": formatted_docs,
         }
-
-        if pending_ingestion_job:
-            try:
-                persist_pending_crawl_results(
-                    pending_ingestion_job,
-                    progress_callback=timeline_cb,
-                )
-            except Exception as exc:
-                timeline_cb(f"答后入库失败: {exc}")
     except Exception as exc:
         tasks_db[task_id]["status"] = "failed"
         timeline_cb(f"任务执行失败: {exc}")

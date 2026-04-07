@@ -35,7 +35,7 @@ COMMON_TRANSLATIONS = {
     "翻译": "translation",
     "术语": "terminology",
     "查询重写": "query rewriting",
-    "召回率": "recall",
+    "召回": "recall",
     "精确率": "precision",
     "鲁棒性": "robustness",
     "agent": "agent",
@@ -51,14 +51,13 @@ CHINESE_STOPWORDS = {
     "如何",
     "怎么",
     "为什么",
-    "一下",
+    "一个",
     "以及",
     "对于",
     "问题",
     "研究",
     "进行",
     "有关",
-    "一个",
     "这个",
     "那个",
     "并且",
@@ -69,6 +68,8 @@ CHINESE_STOPWORDS = {
     "部分",
 }
 
+COMPARISON_PATTERN = re.compile(r"(为什么|为何|区别|对比|比较|优于|更好|优势|vs|VS|比)")
+
 
 class AcademicQueryPlanner:
     """Build a single-query academic retrieval plan."""
@@ -78,22 +79,22 @@ class AcademicQueryPlanner:
         self.prompt = self._build_chain()
 
     def _build_chain(self):
-        prompt = ChatPromptTemplate.from_messages(
+        return ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
                     (
-                        "你是学术研究场景下的查询优化专家。"
-                        "你的任务是把用户的中文或中英混合问题，转成适合本地知识库检索与 arXiv 英文检索的单一查询计划。"
-                        "你必须理解学术术语、英文固定搭配、常见缩写和中英混合表达，优先使用学术界常见且稳定的术语表达。"
-                        "不要拆分子问题，不要输出解释，只返回 JSON。"
+                        "You are the query planner for an academic RAG workflow. "
+                        "Convert a Chinese or mixed Chinese-English user question into one JSON object for "
+                        "local knowledge-base retrieval, retrieval relevance evaluation, Tavily search, and "
+                        "a standalone academic crawler. Return JSON only."
                     ),
                 ),
                 (
                     "human",
                     """
-请基于下面的用户问题，输出严格 JSON，对应字段必须完整：
-{{
+Return strict JSON with exactly these fields:
+{
   "original_query": "...",
   "normalized_query_zh": "...",
   "retrieval_query_zh": "...",
@@ -102,65 +103,31 @@ class AcademicQueryPlanner:
   "keywords_zh": ["..."],
   "keywords_en": ["..."],
   "required_aspects": ["..."]
-}}
+}
 
-规则：
-1. 这是学术研究查询，不要做口语化总结。
-2. normalized_query_zh 是术语规范化后的中文问题。
-3. retrieval_query_zh 用于本地中文知识库检索，要更精准但仍保持自然。
-4. retrieval_query_en 用于英文语义检索，要忠实表达原问题语义，不做逐词直译。
-5. crawler_query_en 用于 arXiv 标题/摘要搜索，要更像学术搜索串，优先核心术语和研究对象。
-6. keywords_zh 与 keywords_en 要去重、按重要性排序。
-7. required_aspects 是“本次检索应该覆盖的文档角度”，必须是英文名词短语列表（noun phrase and NOT sentences），最多 5 个，按重要性排序。
-8. required_aspects 要可检索、可判断，不要写成空泛目标；优先“定义/机制/差异/原因/证据”这类角度。
-9. 对于比较类问题（如 A 为什么比 B 好），required_aspects 优先包含：
-   - A 是什么
-   - B 是什么
-   - A 与 B 的区别
-   - A 更好的原因
-10. 提取关键词时优先保留“术语短语”而不是拆成零散单词。例如：
-   - 机器学习 -> machine learning，不能拆成 machine 和 learning
-   - 深度学习 -> deep learning
-   - 强化学习 -> reinforcement learning
-   - 知识图谱 -> knowledge graph
-   - 信息检索 -> information retrieval
-   - 查询重写 -> query rewriting
-   - 大语言模型 -> large language model
-11. 如果用户问题里已经出现标准英文术语或公认缩写，优先保留并复用，例如 RAG、LLM、BM25、OCR、arXiv，不要改写成生造表达。
-12. 严禁机械翻译、按字面误译、按近音误译。像“机器学习”绝不能写成 mechanic learning；拿不准时，保留公认英文术语或原缩写，也不要发明新词。
-13. keywords_en 必须尽量输出可检索的学术短语，不要变成单词袋。优先输出 machine learning、query rewriting、academic retrieval、question answering 这种短语。
-14. crawler_query_en 比 retrieval_query_en 更短、更像搜索串，尽量去掉 how, improve, use, study 这类弱信息词，保留研究对象、任务、方法和约束。
-15. 如果用户原问题已经足够精准，也仍然要给出英文查询。
-16. 在生成所有字段时，优先使用：
-  - arXiv 常见术语
-  - ACL / NeurIPS 论文标题风格
-17. 不允许输出 markdown 代码块，只允许输出 JSON 对象。
+Rules:
+1. `normalized_query_zh` should be a polished Chinese version of the original intent.
+2. `retrieval_query_zh` is for local Chinese retrieval and should stay concise and natural.
+3. `retrieval_query_en` is for semantic retrieval and must preserve the original meaning instead of literal word-by-word translation.
+4. `crawler_query_en` is only a short fallback academic search string for title/abstract search.
+5. `keywords_zh` and `keywords_en` must be deduplicated and ordered by importance.
+6. `required_aspects` is the most important field. It must be English search-ready noun phrases, not sentences, and at most 5 items.
+7. Every required aspect must be independently searchable and independently judgeable later.
+8. Prefer aspects framed as definition, mechanism, difference, reason, method, limitation, or evidence.
+9. For comparison questions such as "why A is better than B", prefer:
+   - definition of A
+   - definition of B
+   - differences between A and B
+   - advantages of A over B
+10. Preserve standard English academic terms and abbreviations such as RAG, LLM, BM25, OCR, and arXiv.
+11. Avoid invented translations. Keep standard English terms when they are known.
+12. `keywords_en` should prefer academic phrases such as "query rewriting", "information retrieval", and "question answering".
+13. `crawler_query_en` should be shorter than `retrieval_query_en` and remove weak verbs like "how", "improve", "use", and "study" when possible.
+14. `required_aspects` must be directly usable as Tavily search inputs later.
+15. Do not output markdown. Do not output explanations.
 
-Few-shot 示例 1：
-用户问题：
-机器学习如何用于学术论文推荐？
-
-输出：
-{{
-  "original_query": "机器学习如何用于学术论文推荐？",
-  "normalized_query_zh": "机器学习如何用于学术论文推荐与推荐系统优化？",
-  "retrieval_query_zh": "机器学习 学术论文推荐 推荐系统",
-  "retrieval_query_en": "how machine learning can be used for academic paper recommendation",
-  "crawler_query_en": "machine learning academic paper recommendation recommender systems",
-  "keywords_zh": ["机器学习", "学术论文推荐", "推荐系统"],
-  "keywords_en": ["machine learning", "academic paper recommendation", "recommender systems"],
-  "required_aspects": ["definition of machine learning", 
-  "academic paper recommendation task",
-  "machine learning methods for recommendation",
-  "evaluation metrics for recommender systems"]
-}}
-
-Few-shot 示例 2：
-用户问题：
-Transformer 为什么比 RNN 好？
-
-输出：
-{{
+Example:
+{
   "original_query": "Transformer 为什么比 RNN 好？",
   "normalized_query_zh": "Transformer 相比 RNN 的优势来源是什么？",
   "retrieval_query_zh": "Transformer RNN 区别 优势 原因",
@@ -168,38 +135,19 @@ Transformer 为什么比 RNN 好？
   "crawler_query_en": "Transformer RNN differences advantages",
   "keywords_zh": ["Transformer", "RNN", "区别", "优势"],
   "keywords_en": ["Transformer", "RNN", "differences", "advantages"],
-  "required_aspects": ["definition of Transformer",
-  "definition of RNN",
-  "differences between Transformer and RNN",
-  "advantages of Transformer over RNN"]
-}}
+  "required_aspects": [
+    "definition of Transformer",
+    "definition of RNN",
+    "differences between Transformer and RNN",
+    "advantages of Transformer over RNN"
+  ]
+}
 
-Few-shot 示例 3：
-用户问题：
-知识图谱和大语言模型结合做问答有什么方法？
-
-输出：
-{{
-  "original_query": "知识图谱和大语言模型结合做问答有什么方法？",
-  "normalized_query_zh": "知识图谱与大语言模型结合进行问答的方法有哪些？",
-  "retrieval_query_zh": "知识图谱 大语言模型 问答 方法",
-  "retrieval_query_en": "methods for combining knowledge graph and large language model for question answering",
-  "crawler_query_en": "knowledge graph large language model question answering",
-  "keywords_zh": ["知识图谱", "大语言模型", "问答"],
-  "keywords_en": ["knowledge graph", "large language model", "question answering"],
-  "required_aspects": ["definition of knowledge graph",
-  "definition of large language model",
-  "integration methods of knowledge graph and large language model",
-  "advantages and limitations in question answering"]
-}}
-
-用户问题：
-{question}
+User question: {question}
                     """.strip(),
                 ),
             ]
         )
-        return prompt
 
     def build(self, original_query: str) -> AcademicQueryPlan:
         """Return a best-effort query plan."""
@@ -350,22 +298,22 @@ Few-shot 示例 3：
         return self._infer_required_aspects(original_query, keywords_zh)
 
     def _infer_required_aspects(self, original_query: str, keywords_zh: list[str]) -> list[str]:
-        compare_pattern = re.compile(r"(为什么|为何|区别|对比|比较|优于|更好|优势|vs|VS|比)")
-        if len(keywords_zh) >= 2 and compare_pattern.search(original_query or ""):
-            left = keywords_zh[0]
-            right = keywords_zh[1]
+        if len(keywords_zh) >= 2 and COMPARISON_PATTERN.search(original_query or ""):
+            left = self._translate_term(keywords_zh[0]) or keywords_zh[0]
+            right = self._translate_term(keywords_zh[1]) or keywords_zh[1]
             return [
-                f"{left}是什么",
-                f"{right}是什么",
-                f"{left}与{right}的区别",
-                f"{left}更好的原因",
+                f"definition of {left}",
+                f"definition of {right}",
+                f"differences between {left} and {right}",
+                f"advantages of {left} over {right}",
             ][:5]
 
-        base = (original_query or "").strip().rstrip("？?!！。")
+        base = (original_query or "").strip().rstrip("？?!.。")
         if not base:
             return []
+        primary_term = self._translate_term(keywords_zh[0]) if keywords_zh else base
         return [
-            f"{base}的核心定义",
-            f"{base}的关键方法",
-            f"{base}的评估指标",
+            f"definition of {primary_term}",
+            f"core methods for {primary_term}",
+            f"evidence or evaluation for {primary_term}",
         ][:5]

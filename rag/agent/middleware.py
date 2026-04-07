@@ -12,12 +12,36 @@ from langgraph.types import Command
 try:
     from ..query.optimizer import AcademicQueryPlanner
     from ..retrieval.evaluator import evaluate_retrieval
-    from ..schemas import AcademicQueryPlan, CrawlPayload, ResearchState, RetrievalPayload
+    from ..schemas import (
+        AcademicQueryPlan,
+        FinalEvidenceBundle,
+        ResearchState,
+        RetrievalPayload,
+        WebSearchPayload,
+    )
+    from .evidence import (
+        annotate_local_documents,
+        build_final_evidence_bundle,
+        normalized_doc_to_final_evidence_item,
+        select_local_evidence,
+    )
     from .runtime import context, log_progress
 except ImportError:
     from query.optimizer import AcademicQueryPlanner
     from retrieval.evaluator import evaluate_retrieval
-    from schemas import AcademicQueryPlan, CrawlPayload, ResearchState, RetrievalPayload
+    from schemas import (
+        AcademicQueryPlan,
+        FinalEvidenceBundle,
+        ResearchState,
+        RetrievalPayload,
+        WebSearchPayload,
+    )
+    from agent.evidence import (
+        annotate_local_documents,
+        build_final_evidence_bundle,
+        normalized_doc_to_final_evidence_item,
+        select_local_evidence,
+    )
     from agent.runtime import context, log_progress
 
 
@@ -26,11 +50,11 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
 
     state_schema = ResearchState
 
-    def __init__(self, llm, retrieve_tool_name: str, crawl_tool_name: str) -> None:
+    def __init__(self, llm, retrieve_tool_name: str, web_search_tool_name: str) -> None:
         super().__init__()
         self.planner = AcademicQueryPlanner(llm)
         self.retrieve_tool_name = retrieve_tool_name
-        self.crawl_tool_name = crawl_tool_name
+        self.web_search_tool_name = web_search_tool_name
 
     def before_agent(self, state: ResearchState, runtime) -> dict[str, Any] | None:
         original_query = self._extract_latest_user_query(state)
@@ -39,14 +63,12 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         context.original_query = original_query
         context.query_plan = plan.model_dump()
         context.set_current_missing_aspects([])
-        context.set_pending_ingestion_job(None)
         log_progress("查询预处理完成，已生成学术检索计划。")
         return {
             "query_plan": plan.model_dump(),
             "retrieval_result": None,
             "retrieval_sufficient": None,
             "retrieval_next_action": None,
-            "retrieval_retry_count": 0,
             "relevance_score": None,
             "relevance_reason": None,
             "relevance_aspect_coverage": None,
@@ -54,9 +76,10 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             "relevance_noise_ratio": None,
             "relevance_missing_aspects": [],
             "relevance_weak_aspects": [],
-            "crawl_required": False,
-            "crawl_used": False,
-            "final_sources": [],
+            "web_search_required": False,
+            "web_search_used": False,
+            "web_search_result": None,
+            "final_evidence": None,
         }
 
     def wrap_model_call(
@@ -69,18 +92,15 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         retrieval_result = request.state.get("retrieval_result")
         retrieval_sufficient = request.state.get("retrieval_sufficient")
         retrieval_next_action = request.state.get("retrieval_next_action")
-        retrieval_retry_count = int(request.state.get("retrieval_retry_count") or 0)
-        crawl_required = request.state.get("crawl_required", False)
-        crawl_used = request.state.get("crawl_used", False)
+        web_search_required = request.state.get("web_search_required", False)
+        web_search_used = request.state.get("web_search_used", False)
 
         filtered_tools = self._filter_tools(
             tools=request.tools,
             retrieval_result=retrieval_result,
             retrieval_sufficient=retrieval_sufficient,
-            retrieval_next_action=retrieval_next_action,
-            retrieval_retry_count=retrieval_retry_count,
-            crawl_required=crawl_required,
-            crawl_used=crawl_used,
+            web_search_required=web_search_required,
+            web_search_used=web_search_used,
         )
         query_plan_text = self._build_query_plan_hint(
             query_plan=query_plan,
@@ -91,6 +111,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             support_strength=request.state.get("relevance_support_strength"),
             noise_ratio=request.state.get("relevance_noise_ratio"),
             missing_aspects=request.state.get("relevance_missing_aspects") or [],
+            final_evidence_raw=request.state.get("final_evidence"),
         )
         system_message = self._append_system_message(request.system_message, query_plan_text)
 
@@ -110,8 +131,8 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         tool_name = request.tool_call.get("name", "")
         if tool_name == self.retrieve_tool_name:
             return self._handle_retrieval_result(request, result)
-        if tool_name == self.crawl_tool_name:
-            return self._handle_crawl_result(result)
+        if tool_name == self.web_search_tool_name:
+            return self._handle_web_search_result(request, result)
         return result
 
     def _handle_retrieval_result(self, request: ToolCallRequest, result: ToolMessage) -> Command | ToolMessage:
@@ -119,22 +140,29 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             payload = RetrievalPayload(**json.loads(str(result.content)))
             query_plan = AcademicQueryPlan(**(request.state.get("query_plan") or {}))
             evaluation = evaluate_retrieval(query_plan, payload.docs)
-            payload = payload.model_copy(update={"docs": evaluation.scored_docs})
+            annotated_docs = annotate_local_documents(evaluation.scored_docs, evaluation)
+            payload = payload.model_copy(update={"docs": annotated_docs})
 
-            retry_count = int(request.state.get("retrieval_retry_count") or 0)
-            if request.state.get("retrieval_result"):
-                retry_count += 1
+            local_evidence = select_local_evidence(annotated_docs)
+            final_bundle = build_final_evidence_bundle(
+                query=query_plan.original_query,
+                local_evidence=local_evidence,
+                web_evidence=[],
+                uncovered_aspects=[] if evaluation.sufficient else evaluation.missing_aspects,
+                note=(
+                    "local evidence is sufficient for answering"
+                    if evaluation.sufficient
+                    else "web search is required for the remaining missing aspects"
+                ),
+            )
 
-            next_action = evaluation.next_action
             relevance_reason = evaluation.reason
-            if not evaluation.sufficient and next_action == "retrieve_more" and retry_count >= 1:
-                next_action = "crawl_more"
-                relevance_reason = f"{relevance_reason}; retrieval_retry_exhausted=1 -> crawl_more"
+            if not evaluation.sufficient:
+                relevance_reason = f"{relevance_reason}; next_action=search_web"
 
             context.retrieval_result = payload.model_dump()
             context.set_current_missing_aspects(evaluation.missing_aspects)
-            if evaluation.sufficient:
-                context.set_sources([doc.model_dump() for doc in evaluation.scored_docs])
+            context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
                 content=payload.model_dump_json(),
@@ -144,14 +172,13 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             )
             log_progress(
                 "本地检索相关性评估完成："
-                f"sufficient={evaluation.sufficient}, next_action={next_action}"
+                f"sufficient={evaluation.sufficient}, next_action={'answer' if evaluation.sufficient else 'search_web'}"
             )
             return Command(
                 update={
                     "retrieval_result": payload.model_dump(),
                     "retrieval_sufficient": evaluation.sufficient,
-                    "retrieval_next_action": next_action,
-                    "retrieval_retry_count": retry_count,
+                    "retrieval_next_action": "answer" if evaluation.sufficient else "search_web",
                     "relevance_score": evaluation.support_strength,
                     "relevance_reason": relevance_reason,
                     "relevance_aspect_coverage": evaluation.aspect_coverage,
@@ -159,8 +186,10 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                     "relevance_noise_ratio": evaluation.noise_ratio,
                     "relevance_missing_aspects": evaluation.missing_aspects,
                     "relevance_weak_aspects": evaluation.weak_aspects,
-                    "crawl_required": (next_action == "crawl_more") and not evaluation.sufficient,
-                    "final_sources": [doc.model_dump() for doc in evaluation.scored_docs] if evaluation.sufficient else [],
+                    "web_search_required": not evaluation.sufficient,
+                    "web_search_used": False,
+                    "web_search_result": None,
+                    "final_evidence": final_bundle.model_dump(),
                     "messages": [updated_message],
                 }
             )
@@ -168,29 +197,52 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             log_progress(f"检索结果 hook 解析失败，保留原始结果继续执行: {exc}")
             return result
 
-    def _handle_crawl_result(self, result: ToolMessage) -> Command | ToolMessage:
+    def _handle_web_search_result(self, request: ToolCallRequest, result: ToolMessage) -> Command | ToolMessage:
         try:
-            payload = CrawlPayload(**json.loads(str(result.content)))
-            context.crawl_result = payload.model_dump()
-            context.extend_sources([doc.model_dump() for doc in payload.evidence_docs])
+            payload = WebSearchPayload(**json.loads(str(result.content)))
+            context.set_web_search_result(payload.model_dump())
+
+            local_evidence = []
+            final_evidence_raw = request.state.get("final_evidence") or {}
+            if final_evidence_raw:
+                try:
+                    bundle = FinalEvidenceBundle(**final_evidence_raw)
+                    local_evidence = list(bundle.local_evidence)
+                except Exception:
+                    local_evidence = []
+
+            web_evidence = [
+                normalized_doc_to_final_evidence_item(doc, default_origin="tavily_web")
+                for doc in payload.evidence_docs
+            ]
+            final_bundle = build_final_evidence_bundle(
+                query=context.original_query,
+                local_evidence=local_evidence,
+                web_evidence=web_evidence,
+                uncovered_aspects=payload.uncovered_missing_aspects,
+                note="local evidence and Tavily web evidence have been merged for final answering",
+            )
+            context.set_final_evidence(final_bundle.model_dump())
+
             updated_message = ToolMessage(
                 content=payload.model_dump_json(),
                 tool_call_id=result.tool_call_id,
                 name=result.name,
                 status=result.status,
             )
-            log_progress("学术爬虫阶段完成，开始基于补充证据生成最终答案。")
+            log_progress("Tavily 搜索阶段完成，开始基于统一证据生成最终答案。")
             return Command(
                 update={
-                    "crawl_used": True,
-                    "crawl_required": False,
+                    "web_search_used": True,
+                    "web_search_required": False,
+                    "web_search_result": payload.model_dump(),
                     "retrieval_next_action": "answer",
-                    "final_sources": [doc.model_dump() for doc in payload.evidence_docs],
+                    "final_evidence": final_bundle.model_dump(),
                     "messages": [updated_message],
                 }
             )
         except Exception as exc:
-            log_progress(f"爬虫结果 hook 解析失败，保留原始结果继续执行: {exc}")
+            log_progress(f"网页搜索结果 hook 解析失败，保留原始结果继续执行: {exc}")
             return result
 
     def _filter_tools(
@@ -198,21 +250,15 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         tools: list[Any],
         retrieval_result: dict[str, Any] | None,
         retrieval_sufficient: bool | None,
-        retrieval_next_action: str | None,
-        retrieval_retry_count: int,
-        crawl_required: bool,
-        crawl_used: bool,
+        web_search_required: bool,
+        web_search_used: bool,
     ) -> list[Any]:
         if not retrieval_result:
             allowed = {self.retrieve_tool_name}
         elif retrieval_sufficient:
             allowed = set()
-        elif retrieval_next_action == "retrieve_more" and retrieval_retry_count < 1:
-            allowed = {self.retrieve_tool_name}
-        elif retrieval_next_action == "crawl_more" and not crawl_used:
-            allowed = {self.crawl_tool_name}
-        elif crawl_required and not crawl_used:
-            allowed = {self.crawl_tool_name}
+        elif web_search_required and not web_search_used:
+            allowed = {self.web_search_tool_name}
         else:
             allowed = set()
         return [tool for tool in tools if getattr(tool, "name", None) in allowed]
@@ -238,6 +284,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         support_strength: float | None,
         noise_ratio: float | None,
         missing_aspects: list[str],
+        final_evidence_raw: dict[str, Any] | None,
     ) -> str:
         if query_plan is None:
             return "当前未注入查询计划。"
@@ -245,13 +292,11 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         if retrieval_sufficient is None:
             stage_hint = "下一步必须调用 `retrieve_local_kb`，参数使用 retrieval_query_zh。"
         elif retrieval_sufficient:
-            stage_hint = "本地检索结果已经足够，请直接基于证据回答。"
-        elif retrieval_next_action == "retrieve_more":
-            stage_hint = "本地证据仍不足，先再调用一次 `retrieve_local_kb` 补充本地证据。"
-        elif retrieval_next_action == "crawl_more":
-            stage_hint = "本地证据不足，下一步必须调用 `crawl_academic_sources`，参数直接使用当前 missing_aspects 列表。"
+            stage_hint = "本地证据已经足够，禁止继续调用工具，直接使用 final_evidence_bundle 回答。"
+        elif retrieval_next_action == "search_web":
+            stage_hint = "本地证据不足，下一步必须调用 `search_web_with_tavily`，参数直接使用当前 missing_aspects 列表。"
         else:
-            stage_hint = "请按 retrieval_next_action 继续执行后续步骤。"
+            stage_hint = "如果 final_evidence_bundle 已存在，请直接基于它回答。"
 
         metrics_text = (
             "尚未评估"
@@ -262,6 +307,15 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 f"noise_ratio={noise_ratio:.2f}"
             )
         )
+
+        final_evidence_text = "尚未生成"
+        if final_evidence_raw:
+            try:
+                final_evidence = FinalEvidenceBundle(**final_evidence_raw)
+                final_evidence_text = json.dumps(final_evidence.model_dump(), ensure_ascii=False, indent=2)
+            except Exception:
+                final_evidence_text = json.dumps(final_evidence_raw, ensure_ascii=False, indent=2)
+
         return (
             "## Academic Query Plan\n"
             f"- normalized_query_zh: {query_plan.normalized_query_zh}\n"
@@ -273,10 +327,15 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             f"- required_aspects: {query_plan.required_aspects}\n"
             f"- retrieval_next_action: {retrieval_next_action or 'pending'}\n"
             f"- evaluation_metrics: {metrics_text}\n"
-            f"- crawler_missing_aspects: {missing_aspects}\n"
+            f"- missing_aspects: {missing_aspects}\n"
             f"- relevance_reason: {relevance_reason or '尚未评估'}\n"
             f"- workflow_constraint: {stage_hint}\n"
-            "回答必须基于工具返回的 JSON 证据，不允许凭空补写。"
+            "## Final Evidence Bundle\n"
+            f"{final_evidence_text}\n"
+            "最终回答必须优先依据 Final Evidence Bundle。"
+            " 其中每条证据都已经标准化为 origin/content/aspects/title/url。"
+            " 请优先按 aspect 组织回答，明确区分 local_kb 与 tavily_web。"
+            " 如果 uncovered_aspects 非空，必须明确指出仍未覆盖的点。"
         )
 
     def _extract_latest_user_query(self, state: ResearchState) -> str:

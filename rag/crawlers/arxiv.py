@@ -242,10 +242,14 @@ class ArxivCrawlerIntegrated:
         missing_aspects: list[str],
         *,
         query_plan: AcademicQueryPlan | None = None,
+        search_query_overrides: dict[str, str] | None = None,
     ) -> list[CrawlSearchQuery]:
         queries: list[CrawlSearchQuery] = []
         for aspect in self._normalize_aspects(missing_aspects):
-            query_text = self._resolve_aspect_query_text(aspect, query_plan)
+            override_query = ""
+            if search_query_overrides:
+                override_query = self._sanitize_phrase(search_query_overrides.get(aspect, ""))
+            query_text = override_query or self._resolve_aspect_query_text(aspect, query_plan)
             keywords_en = self._extract_english_terms(query_text)
             search_query = self.generate_search_query(query_en=query_text, keywords_en=keywords_en or None)
             if not search_query and query_plan is not None:
@@ -560,6 +564,7 @@ class ArxivCrawlerIntegrated:
         *,
         missing_aspects: list[str],
         query_plan: AcademicQueryPlan | None = None,
+        search_query_overrides: dict[str, str] | None = None,
         max_pages: int = 3,
         max_per_aspect: int = MAX_EVIDENCE_PER_ASPECT,
         max_total_evidence: int = MAX_TOTAL_EVIDENCE,
@@ -581,7 +586,11 @@ class ArxivCrawlerIntegrated:
             )
             return payload, None
 
-        search_queries = self.build_search_queries_for_aspects(requested_aspects, query_plan=query_plan)
+        search_queries = self.build_search_queries_for_aspects(
+            requested_aspects,
+            query_plan=query_plan,
+            search_query_overrides=search_query_overrides,
+        )
         if not search_queries and query_plan is not None:
             fallback_query = self.generate_search_query(
                 query_en=query_plan.crawler_query_en,

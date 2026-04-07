@@ -7,30 +7,30 @@ try:
     from ..llm_factory import create_default_llm
     from ..schemas import ResearchState
     from .middleware import AcademicResearchMiddleware
-    from .tools_impl import crawl_academic_sources, retrieve_local_kb
+    from .tools_impl import retrieve_local_kb, search_web_with_tavily
 except ImportError:
     from llm_factory import create_default_llm
     from schemas import ResearchState
     from agent.middleware import AcademicResearchMiddleware
-    from agent.tools_impl import crawl_academic_sources, retrieve_local_kb
+    from agent.tools_impl import retrieve_local_kb, search_web_with_tavily
 
 
 SYSTEM_PROMPT = """
-你是一个专门服务学术研究场景的专家型 Agent。
-你的任务只有一条单查询主线：
+你是一个服务学术研究问答场景的专家 Agent。
+
+你的工作流必须遵循系统通过 middleware 注入的阶段约束：
 1. 先使用本地知识库检索。
-2. 检索后由系统 hook 自动判断相关性是否充足。
-3. 只有当系统明确判定信息不足时，才允许调用学术爬虫。
-4. 调用 `crawl_academic_sources` 时，参数必须直接使用系统给出的 `missing_aspects`。
-5. 最终只基于工具返回的 JSON 证据回答用户问题。
+2. 系统会在检索后自动完成相关性评估，并派生本地证据对应的 aspects。
+3. 只有当系统明确要求时，才允许调用 `search_web_with_tavily`。
+4. 最终回答优先依据系统注入的 `Final Evidence Bundle`，而不是自行猜测工具输出差异。
 
 回答要求：
-- 用中文输出。
-- 明确区分“本地检索证据”和“爬虫补充证据”。
-- 对爬虫证据，优先按照 `aspect_evidence` 的结构组织：缺失点 -> chunk -> 论文标题/出处。
-- 不要编造文献内容，不要臆测论文结论。
-- 如果证据仍然不足，要明确指出哪些 missing_aspects 还没有被覆盖。
-- 回答时优先引用工具 JSON 中的标题、摘要、来源与 missing_aspects 覆盖情况。
+- 使用中文回答。
+- 优先按 aspect 组织答案。
+- 明确区分“本地知识库证据”和“Tavily 网页证据”。
+- 每个关键结论尽量落到对应证据的 content、title、url。
+- 不要编造来源，不要补写未提供的结论。
+- 如果 `uncovered_aspects` 非空，必须明确指出还有哪些点没有被证据覆盖。
 """.strip()
 
 
@@ -40,11 +40,11 @@ class RagService:
         self.middleware = AcademicResearchMiddleware(
             self.llm,
             retrieve_tool_name=retrieve_local_kb.name,
-            crawl_tool_name=crawl_academic_sources.name,
+            web_search_tool_name=search_web_with_tavily.name,
         )
         self.agent = create_agent(
             model=self.llm,
-            tools=[retrieve_local_kb, crawl_academic_sources],
+            tools=[retrieve_local_kb, search_web_with_tavily],
             system_prompt=SYSTEM_PROMPT,
             state_schema=ResearchState,
             middleware=[self.middleware],

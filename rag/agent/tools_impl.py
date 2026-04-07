@@ -1,20 +1,39 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+import os
+from typing import Any
 
 from langchain_core.tools import tool
 
 try:
-    from ..crawlers.arxiv import ArxivCrawlerIntegrated
-    from ..schemas import AcademicQueryPlan, CrawlPayload, NormalizedDocument, RetrievalPayload
-    from .runtime import context, get_pdf_processor, get_rag_system, log_progress
+    from ..retrieval.evaluator import evaluate_retrieval
+    from ..schemas import (
+        AcademicQueryPlan,
+        FinalEvidenceBundle,
+        NormalizedDocument,
+        RetrievalPayload,
+        WebSearchPayload,
+        WebSearchQuery,
+        WebSearchResultItem,
+    )
+    from .evidence import final_evidence_item_to_normalized_doc
+    from .runtime import context, get_rag_system, log_progress
 except ImportError:
-    from crawlers.arxiv import ArxivCrawlerIntegrated
-    from schemas import AcademicQueryPlan, CrawlPayload, NormalizedDocument, RetrievalPayload
-    from agent.runtime import context, get_pdf_processor, get_rag_system, log_progress
+    from retrieval.evaluator import evaluate_retrieval
+    from schemas import (
+        AcademicQueryPlan,
+        FinalEvidenceBundle,
+        NormalizedDocument,
+        RetrievalPayload,
+        WebSearchPayload,
+        WebSearchQuery,
+        WebSearchResultItem,
+    )
+    from agent.evidence import final_evidence_item_to_normalized_doc
+    from agent.runtime import context, get_rag_system, log_progress
 
 
-PERSIST_MAX_DOWNLOADS = 3
+MAX_TAVILY_RESULTS_PER_ASPECT = 3
 
 
 def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -31,12 +50,21 @@ def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
 
 def _normalize_langchain_doc(doc) -> NormalizedDocument:
     metadata = _safe_metadata(getattr(doc, "metadata", {}) or {})
-    source = str(metadata.get("source", "")).strip() or str(metadata.get("title", "")).strip() or "unknown"
+    title = str(metadata.get("title") or metadata.get("source") or "").strip()
+    url = str(metadata.get("url") or metadata.get("pdf_link") or "").strip()
+    source = str(metadata.get("source", "")).strip() or title or url or "unknown"
     content = str(getattr(doc, "page_content", "")).strip()
+    metadata["title"] = title or source
+    metadata["url"] = url
+    metadata["origin"] = "local_kb"
     return NormalizedDocument(
         content=content,
         source=source,
         score=None,
+        title=title or source,
+        url=url,
+        origin="local_kb",
+        aspects=[],
         metadata=metadata,
     )
 
@@ -58,13 +86,14 @@ def _build_runtime_query_plan(search_query: str) -> AcademicQueryPlan:
         crawler_query_en=fallback_query,
         keywords_zh=[],
         keywords_en=[],
+        required_aspects=[],
     )
 
 
 def _build_retrieval_message(debug: dict[str, Any], returned_count: int) -> str:
     branch_counts = debug.get("branch_counts", {})
     return (
-        "本地混合检索完成: "
+        "本地混合检索完成 "
         f"BM25={branch_counts.get('bm25_en', 0)}, "
         f"Dense-ZH={branch_counts.get('dense_zh', 0)}, "
         f"Dense-EN={branch_counts.get('dense_en', 0)}, "
@@ -95,105 +124,128 @@ def _resolve_missing_aspects(missing_aspects: list[str] | None) -> list[str]:
     return _dedupe_strings(context.current_missing_aspects)
 
 
-def _empty_crawl_payload(message: str, requested_missing_aspects: list[str]) -> CrawlPayload:
-    return CrawlPayload(
+def _empty_web_search_payload(message: str, requested_missing_aspects: list[str]) -> WebSearchPayload:
+    return WebSearchPayload(
         status="empty",
         message=message,
         requested_missing_aspects=requested_missing_aspects,
         covered_missing_aspects=[],
         uncovered_missing_aspects=requested_missing_aspects,
         search_queries=[],
-        aspect_evidence=[],
+        results=[],
         evidence_docs=[],
-        selected_papers=[],
-        ingestion_status="skipped",
-        pending_ingest_paper_count=0,
     )
 
 
-def _emit_postprocess_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:
-    if progress_callback is not None:
-        progress_callback(message)
-    else:
-        log_progress(message)
-
-
-def persist_pending_crawl_results(
-    job_snapshot: dict[str, Any] | None,
-    *,
-    progress_callback: Callable[[str], None] | None = None,
-) -> dict[str, Any]:
-    if not job_snapshot:
-        return {
-            "status": "skipped",
-            "message": "No pending crawl ingestion job.",
-            "downloaded_count": 0,
-            "indexed_doc_count": 0,
-        }
-
-    output_dir = str(job_snapshot.get("output_dir") or "./paper_results")
-    all_papers = [dict(item) for item in (job_snapshot.get("all_papers") or [])]
-    ingest_papers = [dict(item) for item in (job_snapshot.get("ingest_papers") or [])][:PERSIST_MAX_DOWNLOADS]
-    manifest_csv = str(job_snapshot.get("manifest_csv") or "paper_result.csv")
-    manifest_txt = str(job_snapshot.get("manifest_txt") or "formatted_papers.txt")
-
-    if not all_papers:
-        return {
-            "status": "skipped",
-            "message": "Pending crawl job has no papers to persist.",
-            "downloaded_count": 0,
-            "indexed_doc_count": 0,
-        }
-
-    crawler = ArxivCrawlerIntegrated(output_dir)
-    _emit_postprocess_progress(progress_callback, f"开始答后入库，候选论文 {len(ingest_papers)} 篇。")
-
-    crawler.save_to_csv(all_papers, manifest_csv)
-    crawler.save_formatted_papers(
-        [crawler.format_paper(paper) for paper in all_papers],
-        manifest_txt,
+def _get_tavily_api_key() -> str:
+    return (
+        str(os.getenv("TAVILY_API_KEY") or "").strip()
+        or str(os.getenv("RAG_TAVILY_API_KEY") or "").strip()
     )
 
-    pdf_processor = get_pdf_processor()
-    rag_system = get_rag_system()
-    if not ingest_papers or pdf_processor is None or rag_system is None:
-        reason = "No shortlisted papers" if not ingest_papers else "RAG runtime is not initialized"
-        _emit_postprocess_progress(progress_callback, f"答后入库跳过正文处理: {reason}.")
-        return {
-            "status": "skipped",
-            "message": reason,
-            "downloaded_count": 0,
-            "indexed_doc_count": 0,
-        }
 
-    downloaded_count = crawler.download_papers(
-        papers=ingest_papers,
-        max_downloads=min(len(ingest_papers), PERSIST_MAX_DOWNLOADS),
+def _create_tavily_client(api_key: str):
+    from tavily import TavilyClient
+
+    try:
+        return TavilyClient(api_key=api_key)
+    except TypeError:
+        return TavilyClient(api_key)
+
+
+def _build_web_result_item(aspect: str, raw_item: dict[str, Any]) -> WebSearchResultItem | None:
+    title = str(raw_item.get("title") or "").strip()
+    content = str(raw_item.get("content") or raw_item.get("raw_content") or "").strip()
+    url = str(raw_item.get("url") or "").strip()
+    if not content:
+        return None
+    try:
+        score = float(raw_item.get("score")) if raw_item.get("score") is not None else None
+    except (TypeError, ValueError):
+        score = None
+    return WebSearchResultItem(
+        aspect=str(aspect or "").strip(),
+        title=title,
+        content=content,
+        url=url,
+        score=score,
+        favicon=str(raw_item.get("favicon") or "").strip(),
     )
-    indexed_doc_count = 0
-    if downloaded_count > 0:
-        processed_files = pdf_processor.process_pdf_folder(output_dir)
-        indexed_doc_count = len(processed_files or [])
-        if processed_files:
-            rag_system.update_rag_system()
-            _emit_postprocess_progress(
-                progress_callback,
-                f"答后入库完成，下载 {downloaded_count} 篇，处理 {indexed_doc_count} 个 PDF，并刷新索引。",
+
+
+def _merge_web_results_to_docs(results: list[WebSearchResultItem]) -> list[NormalizedDocument]:
+    merged: dict[str, dict[str, Any]] = {}
+    for item in results:
+        key = item.url or item.title or f"{item.aspect}:{item.content[:80]}"
+        entry = merged.get(key)
+        if entry is None:
+            entry = {
+                "title": item.title.strip() or item.url.strip() or "tavily",
+                "url": item.url.strip(),
+                "content": item.content.strip(),
+                "source": item.title.strip() or item.url.strip() or "tavily",
+                "score": item.score,
+                "aspects": [],
+                "favicon": item.favicon.strip(),
+            }
+            merged[key] = entry
+        if item.content and len(item.content) > len(entry["content"]):
+            entry["content"] = item.content.strip()
+        entry["score"] = max(float(entry["score"] or 0.0), float(item.score or 0.0)) or None
+        entry["aspects"] = _dedupe_strings(list(entry["aspects"]) + [item.aspect])
+
+    documents: list[NormalizedDocument] = []
+    for entry in merged.values():
+        metadata = {
+            "title": entry["title"],
+            "url": entry["url"],
+            "origin": "tavily_web",
+            "provider": "tavily",
+            "aspects": list(entry["aspects"]),
+            "favicon": entry["favicon"],
+            "tavily_score": entry["score"],
+        }
+        documents.append(
+            NormalizedDocument(
+                content=entry["content"],
+                source=entry["source"],
+                score=entry["score"],
+                title=entry["title"],
+                url=entry["url"],
+                origin="tavily_web",
+                aspects=list(entry["aspects"]),
+                metadata=metadata,
             )
-        else:
-            _emit_postprocess_progress(
-                progress_callback,
-                f"已下载 {downloaded_count} 篇论文，但没有新的 PDF 被转成 md。",
-            )
-    else:
-        _emit_postprocess_progress(progress_callback, "答后入库未下载到新的 PDF，跳过索引刷新。")
+        )
+    documents.sort(key=lambda doc: float(doc.score or 0.0), reverse=True)
+    return documents
 
-    return {
-        "status": "completed" if downloaded_count > 0 else "skipped",
-        "message": "Post-answer crawl ingestion finished.",
-        "downloaded_count": downloaded_count,
-        "indexed_doc_count": indexed_doc_count,
-    }
+
+def _build_missing_aspect_plan(
+    query_plan: AcademicQueryPlan,
+    requested_missing_aspects: list[str],
+) -> AcademicQueryPlan:
+    joined = " ".join(requested_missing_aspects)
+    return query_plan.model_copy(
+        update={
+            "retrieval_query_en": joined or query_plan.retrieval_query_en,
+            "crawler_query_en": joined or query_plan.crawler_query_en,
+            "required_aspects": list(requested_missing_aspects),
+        }
+    )
+
+
+def _load_current_local_evidence_docs() -> list[NormalizedDocument]:
+    bundle_raw = context.final_evidence or {}
+    if not bundle_raw:
+        return []
+
+    try:
+        bundle = FinalEvidenceBundle(**bundle_raw)
+    except Exception:
+        return []
+
+    return [final_evidence_item_to_normalized_doc(item) for item in bundle.local_evidence]
 
 
 @tool
@@ -227,7 +279,6 @@ def retrieve_local_kb(search_query: str) -> str:
             docs=normalized_docs,
         )
         context.retrieval_result = payload.model_dump()
-        context.extend_sources([doc.model_dump() for doc in normalized_docs])
         return payload.model_dump_json()
     except Exception as exc:
         payload = RetrievalPayload(
@@ -241,34 +292,94 @@ def retrieve_local_kb(search_query: str) -> str:
 
 
 @tool
-def crawl_academic_sources(missing_aspects: list[str]) -> str:
-    """Crawl academic sources with missing_aspects and return compact aspect-oriented evidence."""
+def search_web_with_tavily(missing_aspects: list[str]) -> str:
+    """Search Tavily with the current missing_aspects and return normalized web evidence."""
     requested_missing_aspects = _resolve_missing_aspects(missing_aspects)
     context.set_current_missing_aspects(requested_missing_aspects)
 
     if not requested_missing_aspects:
-        payload = _empty_crawl_payload("missing_aspects 为空，跳过学术爬虫。", [])
-        context.set_pending_ingestion_job(None)
-        context.crawl_result = payload.model_dump()
+        payload = _empty_web_search_payload("missing_aspects 为空，跳过 Tavily 搜索。", [])
+        context.set_web_search_result(payload.model_dump())
         return payload.model_dump_json()
 
-    log_progress(f"正在执行学术爬虫，missing_aspects={requested_missing_aspects}")
-    crawler = ArxivCrawlerIntegrated("./paper_results")
-    query_plan = _build_runtime_query_plan(" ".join(requested_missing_aspects))
+    api_key = _get_tavily_api_key()
+    if not api_key:
+        payload = _empty_web_search_payload(
+            "未配置 TAVILY_API_KEY，无法执行 Tavily 搜索。",
+            requested_missing_aspects,
+        )
+        context.set_web_search_result(payload.model_dump())
+        return payload.model_dump_json()
 
     try:
-        payload, ingestion_job = crawler.crawl_and_collect(
-            missing_aspects=requested_missing_aspects,
-            query_plan=query_plan,
-            max_pages=3,
-        )
+        client = _create_tavily_client(api_key)
     except Exception as exc:
-        payload = _empty_crawl_payload(f"学术爬虫执行失败: {exc}", requested_missing_aspects)
-        context.set_pending_ingestion_job(None)
-        context.crawl_result = payload.model_dump()
+        payload = _empty_web_search_payload(
+            f"Tavily 客户端初始化失败: {exc}",
+            requested_missing_aspects,
+        )
+        context.set_web_search_result(payload.model_dump())
         return payload.model_dump_json()
 
-    context.set_pending_ingestion_job(ingestion_job)
-    context.crawl_result = payload.model_dump()
-    context.extend_sources([doc.model_dump() for doc in payload.evidence_docs])
+    query_plan = _build_runtime_query_plan(" ".join(requested_missing_aspects))
+    search_queries: list[WebSearchQuery] = []
+    result_items: list[WebSearchResultItem] = []
+
+    log_progress(f"正在执行 Tavily 搜索，missing_aspects={requested_missing_aspects}")
+    for aspect in requested_missing_aspects:
+        search_queries.append(WebSearchQuery(aspect=aspect, query=aspect))
+        try:
+            response = client.search(query=aspect, search_depth="advanced")
+        except Exception as exc:
+            log_progress(f"Tavily 搜索失败，aspect={aspect}: {exc}")
+            continue
+
+        raw_results = response.get("results") if isinstance(response, dict) else []
+        kept = 0
+        for raw_item in raw_results or []:
+            item = _build_web_result_item(aspect, raw_item)
+            if item is None:
+                continue
+            result_items.append(item)
+            kept += 1
+            if kept >= MAX_TAVILY_RESULTS_PER_ASPECT:
+                break
+
+    evidence_docs = _merge_web_results_to_docs(result_items)
+    combined_docs = [*_load_current_local_evidence_docs(), *evidence_docs]
+    coverage_plan = _build_missing_aspect_plan(query_plan, requested_missing_aspects)
+
+    covered_missing_aspects: list[str] = []
+    uncovered_missing_aspects = list(requested_missing_aspects)
+    if combined_docs:
+        evaluation = evaluate_retrieval(coverage_plan, combined_docs)
+        covered_missing_aspects = list(evaluation.covered_aspects)
+        uncovered_missing_aspects = [
+            aspect for aspect in requested_missing_aspects if aspect not in covered_missing_aspects
+        ]
+
+    if evidence_docs:
+        status = "success" if not uncovered_missing_aspects else "partial_success"
+    else:
+        status = "empty"
+
+    message = (
+        f"Tavily returned {len(result_items)} results, "
+        f"normalized into {len(evidence_docs)} evidence docs, "
+        f"covered {len(covered_missing_aspects)}/{len(requested_missing_aspects)} missing_aspects."
+    )
+    if uncovered_missing_aspects:
+        message = f"{message} Uncovered: {', '.join(uncovered_missing_aspects[:4])}."
+
+    payload = WebSearchPayload(
+        status=status,
+        message=message,
+        requested_missing_aspects=requested_missing_aspects,
+        covered_missing_aspects=covered_missing_aspects,
+        uncovered_missing_aspects=uncovered_missing_aspects,
+        search_queries=search_queries,
+        results=result_items,
+        evidence_docs=evidence_docs,
+    )
+    context.set_web_search_result(payload.model_dump())
     return payload.model_dump_json()
