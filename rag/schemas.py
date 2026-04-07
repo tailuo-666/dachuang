@@ -51,19 +51,53 @@ class CrawlPaper(BaseModel):
     authors: list[str] = Field(default_factory=list)
 
 
+class CrawlSearchQuery(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    aspect: str
+    query: str
+
+
+class AspectEvidence(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    aspect: str
+    coverage_status: str = "covered"
+    chunk: str
+    score: float = 0.0
+    paper_title: str
+    paper_source: str = ""
+    pdf_link: str = ""
+    authors: list[str] = Field(default_factory=list)
+    submission_date: str = ""
+
+
+class SelectedPaper(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    title: str
+    abstract: str = ""
+    submission_date: str = ""
+    pdf_link: str = ""
+    authors: list[str] = Field(default_factory=list)
+    matched_aspects: list[str] = Field(default_factory=list)
+
+
 class CrawlPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     kind: str = "crawl_result"
     status: str
     message: str
-    query: str
-    query_en: str
-    keywords_en: list[str] = Field(default_factory=list)
-    papers: list[CrawlPaper] = Field(default_factory=list)
+    requested_missing_aspects: list[str] = Field(default_factory=list)
+    covered_missing_aspects: list[str] = Field(default_factory=list)
+    uncovered_missing_aspects: list[str] = Field(default_factory=list)
+    search_queries: list[CrawlSearchQuery] = Field(default_factory=list)
+    aspect_evidence: list[AspectEvidence] = Field(default_factory=list)
     evidence_docs: list[NormalizedDocument] = Field(default_factory=list)
-    downloaded_count: int = 0
-    indexed_doc_count: int = 0
+    selected_papers: list[SelectedPaper] = Field(default_factory=list)
+    ingestion_status: str = "pending"
+    pending_ingest_paper_count: int = 0
 
 
 class RelevanceEvaluation(BaseModel):

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 try:
@@ -26,6 +27,8 @@ class ResearchContext:
         self.retrieval_result: dict[str, Any] | None = None
         self.crawl_result: dict[str, Any] | None = None
         self.papers: list[dict[str, Any]] = []
+        self.current_missing_aspects: list[str] = []
+        self.pending_ingestion_job: dict[str, Any] | None = None
 
     def set_sources(self, docs: list[dict[str, Any]]) -> None:
         self.papers = [dict(doc) for doc in docs]
@@ -38,6 +41,15 @@ class ResearchContext:
                 key = f"source_{len(existing) + 1}"
             existing[key] = dict(doc)
         self.papers = list(existing.values())
+
+    def set_current_missing_aspects(self, aspects: list[str] | None) -> None:
+        self.current_missing_aspects = [str(item).strip() for item in (aspects or []) if str(item).strip()]
+
+    def set_pending_ingestion_job(self, job: dict[str, Any] | None) -> None:
+        self.pending_ingestion_job = copy.deepcopy(job) if job else None
+
+    def snapshot_pending_ingestion_job(self) -> dict[str, Any] | None:
+        return copy.deepcopy(self.pending_ingestion_job) if self.pending_ingestion_job else None
 
 
 context = ResearchContext()
@@ -72,4 +84,3 @@ def log_progress(message: str):
     print(message)
     if _progress_callback:
         _progress_callback(message)
-

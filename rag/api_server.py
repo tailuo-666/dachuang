@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from agent.builder import RagService
 from agent.runtime import context as research_context, init_runtime, set_progress_callback
+from agent.tools_impl import persist_pending_crawl_results
 from llm_factory import create_default_llm
 from pdf_processor import PDFProcessor
 from rag_system import setup_rag_system
@@ -24,7 +25,7 @@ app.add_middleware(
 
 tasks_db = {}
 
-print("正在初始化 RAG 运行时...")
+print("Initializing RAG runtime...")
 pdf_processor = PDFProcessor(output_dir="./md", lang="en", dpi=220)
 rag_system = setup_rag_system()
 init_runtime(
@@ -32,7 +33,7 @@ init_runtime(
     pdf_processor=pdf_processor,
     llm=create_default_llm(),
 )
-print("RAG 运行时初始化完成。")
+print("RAG runtime initialized.")
 
 
 class QuestionRequest(BaseModel):
@@ -58,6 +59,7 @@ def run_rag_task(task_id: str, question: str):
 
         agent_service = RagService()
         result = agent_service.run(query=question, thread_id=task_id)
+        pending_ingestion_job = research_context.snapshot_pending_ingestion_job()
 
         timeline_cb("Agent 执行完成，正在提取答案和来源。")
 
@@ -76,10 +78,10 @@ def run_rag_task(task_id: str, question: str):
         formatted_docs = []
         for doc in research_context.papers:
             if hasattr(doc, "page_content"):
-                source = doc.metadata.get("source", "未知文件")
+                source = doc.metadata.get("source", "unknown")
                 content = doc.page_content[:300]
             elif isinstance(doc, dict):
-                source = doc.get("source") or doc.get("metadata", {}).get("title") or "未知文件"
+                source = doc.get("source") or doc.get("metadata", {}).get("title") or "unknown"
                 content = str(doc.get("content", ""))[:300]
             else:
                 continue
@@ -97,6 +99,15 @@ def run_rag_task(task_id: str, question: str):
             "answer": final_answer or "Agent 未能生成有效答案",
             "sources": formatted_docs,
         }
+
+        if pending_ingestion_job:
+            try:
+                persist_pending_crawl_results(
+                    pending_ingestion_job,
+                    progress_callback=timeline_cb,
+                )
+            except Exception as exc:
+                timeline_cb(f"答后入库失败: {exc}")
     except Exception as exc:
         tasks_db[task_id]["status"] = "failed"
         timeline_cb(f"任务执行失败: {exc}")

@@ -1,17 +1,20 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.tools import tool
 
 try:
     from ..crawlers.arxiv import ArxivCrawlerIntegrated
-    from ..schemas import AcademicQueryPlan, NormalizedDocument, RetrievalPayload
+    from ..schemas import AcademicQueryPlan, CrawlPayload, NormalizedDocument, RetrievalPayload
     from .runtime import context, get_pdf_processor, get_rag_system, log_progress
 except ImportError:
     from crawlers.arxiv import ArxivCrawlerIntegrated
-    from schemas import AcademicQueryPlan, NormalizedDocument, RetrievalPayload
+    from schemas import AcademicQueryPlan, CrawlPayload, NormalizedDocument, RetrievalPayload
     from agent.runtime import context, get_pdf_processor, get_rag_system, log_progress
+
+
+PERSIST_MAX_DOWNLOADS = 3
 
 
 def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
@@ -28,11 +31,7 @@ def _safe_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
 
 def _normalize_langchain_doc(doc) -> NormalizedDocument:
     metadata = _safe_metadata(getattr(doc, "metadata", {}) or {})
-    source = (
-        str(metadata.get("source", "")).strip()
-        or str(metadata.get("title", "")).strip()
-        or "unknown"
-    )
+    source = str(metadata.get("source", "")).strip() or str(metadata.get("title", "")).strip() or "unknown"
     content = str(getattr(doc, "page_content", "")).strip()
     return NormalizedDocument(
         content=content,
@@ -74,6 +73,129 @@ def _build_retrieval_message(debug: dict[str, Any], returned_count: int) -> str:
     )
 
 
+def _dedupe_strings(items: list[str] | None) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for item in items or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        lowered = text.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        deduped.append(text)
+    return deduped
+
+
+def _resolve_missing_aspects(missing_aspects: list[str] | None) -> list[str]:
+    requested = _dedupe_strings(missing_aspects)
+    if requested:
+        return requested
+    return _dedupe_strings(context.current_missing_aspects)
+
+
+def _empty_crawl_payload(message: str, requested_missing_aspects: list[str]) -> CrawlPayload:
+    return CrawlPayload(
+        status="empty",
+        message=message,
+        requested_missing_aspects=requested_missing_aspects,
+        covered_missing_aspects=[],
+        uncovered_missing_aspects=requested_missing_aspects,
+        search_queries=[],
+        aspect_evidence=[],
+        evidence_docs=[],
+        selected_papers=[],
+        ingestion_status="skipped",
+        pending_ingest_paper_count=0,
+    )
+
+
+def _emit_postprocess_progress(progress_callback: Callable[[str], None] | None, message: str) -> None:
+    if progress_callback is not None:
+        progress_callback(message)
+    else:
+        log_progress(message)
+
+
+def persist_pending_crawl_results(
+    job_snapshot: dict[str, Any] | None,
+    *,
+    progress_callback: Callable[[str], None] | None = None,
+) -> dict[str, Any]:
+    if not job_snapshot:
+        return {
+            "status": "skipped",
+            "message": "No pending crawl ingestion job.",
+            "downloaded_count": 0,
+            "indexed_doc_count": 0,
+        }
+
+    output_dir = str(job_snapshot.get("output_dir") or "./paper_results")
+    all_papers = [dict(item) for item in (job_snapshot.get("all_papers") or [])]
+    ingest_papers = [dict(item) for item in (job_snapshot.get("ingest_papers") or [])][:PERSIST_MAX_DOWNLOADS]
+    manifest_csv = str(job_snapshot.get("manifest_csv") or "paper_result.csv")
+    manifest_txt = str(job_snapshot.get("manifest_txt") or "formatted_papers.txt")
+
+    if not all_papers:
+        return {
+            "status": "skipped",
+            "message": "Pending crawl job has no papers to persist.",
+            "downloaded_count": 0,
+            "indexed_doc_count": 0,
+        }
+
+    crawler = ArxivCrawlerIntegrated(output_dir)
+    _emit_postprocess_progress(progress_callback, f"开始答后入库，候选论文 {len(ingest_papers)} 篇。")
+
+    crawler.save_to_csv(all_papers, manifest_csv)
+    crawler.save_formatted_papers(
+        [crawler.format_paper(paper) for paper in all_papers],
+        manifest_txt,
+    )
+
+    pdf_processor = get_pdf_processor()
+    rag_system = get_rag_system()
+    if not ingest_papers or pdf_processor is None or rag_system is None:
+        reason = "No shortlisted papers" if not ingest_papers else "RAG runtime is not initialized"
+        _emit_postprocess_progress(progress_callback, f"答后入库跳过正文处理: {reason}.")
+        return {
+            "status": "skipped",
+            "message": reason,
+            "downloaded_count": 0,
+            "indexed_doc_count": 0,
+        }
+
+    downloaded_count = crawler.download_papers(
+        papers=ingest_papers,
+        max_downloads=min(len(ingest_papers), PERSIST_MAX_DOWNLOADS),
+    )
+    indexed_doc_count = 0
+    if downloaded_count > 0:
+        processed_files = pdf_processor.process_pdf_folder(output_dir)
+        indexed_doc_count = len(processed_files or [])
+        if processed_files:
+            rag_system.update_rag_system()
+            _emit_postprocess_progress(
+                progress_callback,
+                f"答后入库完成，下载 {downloaded_count} 篇，处理 {indexed_doc_count} 个 PDF，并刷新索引。",
+            )
+        else:
+            _emit_postprocess_progress(
+                progress_callback,
+                f"已下载 {downloaded_count} 篇论文，但没有新的 PDF 被转成 md。",
+            )
+    else:
+        _emit_postprocess_progress(progress_callback, "答后入库未下载到新的 PDF，跳过索引刷新。")
+
+    return {
+        "status": "completed" if downloaded_count > 0 else "skipped",
+        "message": "Post-answer crawl ingestion finished.",
+        "downloaded_count": downloaded_count,
+        "indexed_doc_count": indexed_doc_count,
+    }
+
+
 @tool
 def retrieve_local_kb(search_query: str) -> str:
     """Retrieve documents from the local academic knowledge base. Always use this tool first."""
@@ -87,7 +209,7 @@ def retrieve_local_kb(search_query: str) -> str:
     ):
         payload = RetrievalPayload(
             status="error",
-            message="RAG系统未初始化，无法执行本地检索。",
+            message="RAG 系统未初始化，无法执行本地检索。",
             query=search_query,
             doc_count=0,
             docs=[],
@@ -119,61 +241,34 @@ def retrieve_local_kb(search_query: str) -> str:
 
 
 @tool
-def crawl_academic_sources(query_en: str, keywords_en: list[str]) -> str:
-    """Crawl academic sources, especially arXiv, using the optimized English query plan."""
-    log_progress(f"正在执行学术爬虫: {query_en}")
+def crawl_academic_sources(missing_aspects: list[str]) -> str:
+    """Crawl academic sources with missing_aspects and return compact aspect-oriented evidence."""
+    requested_missing_aspects = _resolve_missing_aspects(missing_aspects)
+    context.set_current_missing_aspects(requested_missing_aspects)
+
+    if not requested_missing_aspects:
+        payload = _empty_crawl_payload("missing_aspects 为空，跳过学术爬虫。", [])
+        context.set_pending_ingestion_job(None)
+        context.crawl_result = payload.model_dump()
+        return payload.model_dump_json()
+
+    log_progress(f"正在执行学术爬虫，missing_aspects={requested_missing_aspects}")
     crawler = ArxivCrawlerIntegrated("./paper_results")
-    payload = crawler.crawl_and_collect(query_en=query_en, keywords_en=keywords_en, max_pages=3)
+    query_plan = _build_runtime_query_plan(" ".join(requested_missing_aspects))
 
-    pdf_processor = get_pdf_processor()
-    rag_system = get_rag_system()
-
-    if payload.papers:
-        crawler.save_to_csv([paper.model_dump() for paper in payload.papers], "paper_result.csv")
-        crawler.save_formatted_papers(
-            [crawler.format_paper(paper.model_dump()) for paper in payload.papers],
-            "formatted_papers.txt",
+    try:
+        payload, ingestion_job = crawler.crawl_and_collect(
+            missing_aspects=requested_missing_aspects,
+            query_plan=query_plan,
+            max_pages=3,
         )
+    except Exception as exc:
+        payload = _empty_crawl_payload(f"学术爬虫执行失败: {exc}", requested_missing_aspects)
+        context.set_pending_ingestion_job(None)
+        context.crawl_result = payload.model_dump()
+        return payload.model_dump_json()
 
-    if payload.papers and pdf_processor and rag_system:
-        try:
-            downloaded_count = crawler.download_papers(
-                papers=[paper.model_dump() for paper in payload.papers],
-                max_downloads=3,
-            )
-            indexed_doc_count = 0
-            if downloaded_count > 0:
-                processed = pdf_processor.process_pdf_folder("./paper_results")
-                if processed:
-                    rag_system.update_rag_system()
-                    refreshed_plan = _build_runtime_query_plan(query_en)
-                    refreshed_normalized, debug = rag_system.retrieve_with_query_plan(
-                        refreshed_plan,
-                        final_top_k=5,
-                    )
-                    indexed_doc_count = len(refreshed_normalized)
-                    if refreshed_normalized:
-                        payload = payload.model_copy(
-                            update={
-                                "message": (
-                                    f"{payload.message} 已下载{downloaded_count} 篇论文并刷新知识库。"
-                                    f"{_build_retrieval_message(debug, len(refreshed_normalized))}"
-                                ),
-                                "evidence_docs": refreshed_normalized,
-                                "downloaded_count": downloaded_count,
-                                "indexed_doc_count": indexed_doc_count,
-                            }
-                        )
-            else:
-                payload = payload.model_copy(update={"downloaded_count": 0, "indexed_doc_count": 0})
-        except Exception as exc:
-            payload = payload.model_copy(
-                update={
-                    "status": "partial_success",
-                    "message": f"{payload.message} PDF 下载或入库失败: {exc}",
-                }
-            )
-
+    context.set_pending_ingestion_job(ingestion_job)
     context.crawl_result = payload.model_dump()
-    context.set_sources([doc.model_dump() for doc in payload.evidence_docs])
+    context.extend_sources([doc.model_dump() for doc in payload.evidence_docs])
     return payload.model_dump_json()

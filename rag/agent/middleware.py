@@ -38,6 +38,8 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         context.reset()
         context.original_query = original_query
         context.query_plan = plan.model_dump()
+        context.set_current_missing_aspects([])
+        context.set_pending_ingestion_job(None)
         log_progress("查询预处理完成，已生成学术检索计划。")
         return {
             "query_plan": plan.model_dump(),
@@ -130,6 +132,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 relevance_reason = f"{relevance_reason}; retrieval_retry_exhausted=1 -> crawl_more"
 
             context.retrieval_result = payload.model_dump()
+            context.set_current_missing_aspects(evaluation.missing_aspects)
             if evaluation.sufficient:
                 context.set_sources([doc.model_dump() for doc in evaluation.scored_docs])
 
@@ -169,7 +172,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         try:
             payload = CrawlPayload(**json.loads(str(result.content)))
             context.crawl_result = payload.model_dump()
-            context.set_sources([doc.model_dump() for doc in payload.evidence_docs])
+            context.extend_sources([doc.model_dump() for doc in payload.evidence_docs])
             updated_message = ToolMessage(
                 content=payload.model_dump_json(),
                 tool_call_id=result.tool_call_id,
@@ -242,13 +245,13 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         if retrieval_sufficient is None:
             stage_hint = "下一步必须调用 `retrieve_local_kb`，参数使用 retrieval_query_zh。"
         elif retrieval_sufficient:
-            stage_hint = "检索结果已足够，请直接基于证据回答。"
+            stage_hint = "本地检索结果已经足够，请直接基于证据回答。"
         elif retrieval_next_action == "retrieve_more":
-            stage_hint = "检索结果不足，先再调用一次 `retrieve_local_kb` 补充本地证据。"
+            stage_hint = "本地证据仍不足，先再调用一次 `retrieve_local_kb` 补充本地证据。"
         elif retrieval_next_action == "crawl_more":
-            stage_hint = "检索结果不足，下一步必须调用 `crawl_academic_sources`。"
+            stage_hint = "本地证据不足，下一步必须调用 `crawl_academic_sources`，参数直接使用当前 missing_aspects 列表。"
         else:
-            stage_hint = "检索结果不足，请按 retrieval_next_action 指示继续执行。"
+            stage_hint = "请按 retrieval_next_action 继续执行后续步骤。"
 
         metrics_text = (
             "尚未评估"
@@ -264,13 +267,13 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             f"- normalized_query_zh: {query_plan.normalized_query_zh}\n"
             f"- retrieval_query_zh: {query_plan.retrieval_query_zh}\n"
             f"- retrieval_query_en: {query_plan.retrieval_query_en}\n"
-            f"- crawler_query_en: {query_plan.crawler_query_en}\n"
+            f"- crawler_fallback_en: {query_plan.crawler_query_en}\n"
             f"- keywords_zh: {query_plan.keywords_zh}\n"
-            f"- keywords_en: {query_plan.keywords_en}\n"
+            f"- keywords_en_fallback: {query_plan.keywords_en}\n"
             f"- required_aspects: {query_plan.required_aspects}\n"
             f"- retrieval_next_action: {retrieval_next_action or 'pending'}\n"
             f"- evaluation_metrics: {metrics_text}\n"
-            f"- missing_aspects: {missing_aspects}\n"
+            f"- crawler_missing_aspects: {missing_aspects}\n"
             f"- relevance_reason: {relevance_reason or '尚未评估'}\n"
             f"- workflow_constraint: {stage_hint}\n"
             "回答必须基于工具返回的 JSON 证据，不允许凭空补写。"
