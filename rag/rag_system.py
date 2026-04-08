@@ -6,17 +6,30 @@ import re
 from collections import defaultdict
 from typing import Any
 
+import requests
+
 from langchain_community.document_loaders import TextLoader
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_community.retrievers import BM25Retriever
 from langchain_experimental.text_splitter import SemanticChunker
-from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 try:
     from .schemas import AcademicQueryPlan, NormalizedDocument
+    from .ssh_service import (
+        build_ssh_service_config,
+        discover_openai_model,
+        ensure_ssh_openai_base_url,
+        is_ssh_tunnel_enabled,
+    )
 except ImportError:
     from schemas import AcademicQueryPlan, NormalizedDocument
+    from ssh_service import (
+        build_ssh_service_config,
+        discover_openai_model,
+        ensure_ssh_openai_base_url,
+        is_ssh_tunnel_enabled,
+    )
 
 
 MD_OUTPUT_FOLDER = "./md"
@@ -25,6 +38,53 @@ DENSE_TOP_K = 15
 RRF_TOP_K = 20
 FINAL_TOP_K = 5
 RRF_K = 60
+MIN_INDEX_CHARS = 20
+
+
+class VLLMOpenAIEmbeddings:
+    """Minimal OpenAI-compatible embeddings client for local vLLM services."""
+
+    def __init__(self, *, base_url: str, model: str, api_key: str = "EMPTY", timeout: float = 60.0):
+        self.base_url = str(base_url or "").rstrip("/")
+        self.model = str(model or "").strip()
+        self.api_key = str(api_key or "EMPTY").strip() or "EMPTY"
+        self.timeout = float(timeout)
+
+    def _post_embeddings(self, texts: list[str]) -> list[list[float]]:
+        if not self.base_url:
+            raise ValueError("Embedding base_url is empty.")
+        if not self.model:
+            raise ValueError("Embedding model is empty.")
+
+        url = f"{self.base_url}/embeddings"
+        resp = requests.post(
+            url,
+            timeout=self.timeout,
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            json={
+                "model": self.model,
+                "input": texts,
+            },
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+        data = payload.get("data") or []
+        vectors = [item.get("embedding") for item in data if isinstance(item, dict) and item.get("embedding")]
+        if len(vectors) != len(texts):
+            raise ValueError(
+                f"Embedding response count mismatch: expected {len(texts)}, got {len(vectors)}."
+            )
+        return vectors
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        cleaned = [str(text or "") for text in texts]
+        return self._post_embeddings(cleaned)
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._post_embeddings([str(text or "")])[0]
 
 
 class RAGSystem:
@@ -33,16 +93,99 @@ class RAGSystem:
         self.vectorstore = None
         self.retriever = None
 
-    def setup_embeddings(self, embedding_model_path="/root/.cache/modelscope/hub/models/BAAI/bge-m3"):
-        """Load the embedding model used by the local retriever."""
+    def _resolve_embedding_ssh_config(self) -> dict[str, Any]:
+        return build_ssh_service_config(
+            "embedding",
+            default_remote_port=int(os.getenv("RAG_EMBEDDING_REMOTE_PORT", "8000")),
+            default_local_port=int(os.getenv("RAG_EMBEDDING_LOCAL_PORT", "18000")),
+        )
+
+    def _resolve_embedding_base_url(self) -> str:
+        explicit_base_url = str(os.getenv("RAG_EMBEDDING_BASE_URL") or "").strip().rstrip("/")
+        if explicit_base_url:
+            return explicit_base_url
+
+        ssh_config = self._resolve_embedding_ssh_config()
+        if is_ssh_tunnel_enabled(ssh_config):
+            try:
+                return ensure_ssh_openai_base_url("embedding", ssh_config)
+            except Exception as exc:
+                print(f"Failed to establish embedding SSH tunnel: {exc}")
+
+        embedding_host = str(os.getenv("RAG_EMBEDDING_HOST") or "").strip()
+        embedding_port = str(os.getenv("RAG_EMBEDDING_PORT") or "").strip()
+        embedding_scheme = str(os.getenv("RAG_EMBEDDING_SCHEME", "http")).strip() or "http"
+        if embedding_host and embedding_port:
+            return f"{embedding_scheme}://{embedding_host}:{embedding_port}/v1"
+        return ""
+
+    def _resolve_embedding_model(self) -> str:
+        configured = str(os.getenv("RAG_EMBEDDING_MODEL") or "").strip()
+        if configured:
+            return configured
+
+        base_url = self._resolve_embedding_base_url()
+        if not base_url:
+            return ""
+
+        discovered = discover_openai_model(
+            base_url,
+            api_key=str(os.getenv("RAG_EMBEDDING_API_KEY", "EMPTY")).strip() or "EMPTY",
+        )
+        if discovered:
+            return discovered
+
+        print("Failed to discover embedding model from service.")
+        return ""
+
+    def _resolve_embedding_model_path(self, embedding_model_path=None):
+        candidates = [
+            embedding_model_path,
+            os.getenv("RAG_EMBEDDING_MODEL_PATH"),
+            "/data/202225220617/bge-m3",
+            "/data/202225220617/bge-m3/",
+            "/root/.cache/modelscope/hub/models/BAAI/bge-m3",
+        ]
+        for candidate in candidates:
+            path = str(candidate or "").strip()
+            if path and os.path.exists(path):
+                return path
+        return str(candidates[-1] or "").strip()
+
+    def setup_embeddings(self, embedding_model_path=None):
+        """Load the embedding model used by the retriever, preferring the remote service."""
         print("Loading embedding model...")
+        embedding_base_url = self._resolve_embedding_base_url()
+        embedding_service_model = self._resolve_embedding_model()
+        embedding_api_key = str(os.getenv("RAG_EMBEDDING_API_KEY", "EMPTY")).strip() or "EMPTY"
+
+        if embedding_base_url and embedding_service_model:
+            try:
+                self.embeddings = VLLMOpenAIEmbeddings(
+                    base_url=embedding_base_url,
+                    model=embedding_service_model,
+                    api_key=embedding_api_key,
+                )
+                test_emb = self.embeddings.embed_documents(["test"])
+                if test_emb and len(test_emb[0]) > 0:
+                    print(
+                        f"Embedding service connected: {embedding_base_url} model={embedding_service_model}."
+                    )
+                    return
+            except Exception as exc:
+                print(f"Failed to use embedding service, fallback to local model path: {exc}")
+
+        resolved_model_path = self._resolve_embedding_model_path(embedding_model_path)
+        embedding_device = str(os.getenv("RAG_EMBEDDING_DEVICE", "cuda:0")).strip() or "cuda:0"
 
         try:
-            if os.path.exists(embedding_model_path):
+            if resolved_model_path and os.path.exists(resolved_model_path):
+                from langchain_huggingface import HuggingFaceEmbeddings
+
                 self.embeddings = HuggingFaceEmbeddings(
-                    model_name=embedding_model_path,
+                    model_name=resolved_model_path,
                     model_kwargs={
-                        "device": "cuda:1",
+                        "device": embedding_device,
                         "trust_remote_code": True,
                     },
                     encode_kwargs={
@@ -52,7 +195,7 @@ class RAGSystem:
                 )
                 test_emb = self.embeddings.embed_documents(["test"])
                 if test_emb and len(test_emb[0]) > 0:
-                    print("Embedding model loaded.")
+                    print(f"Embedding model loaded from {resolved_model_path} on {embedding_device}.")
                     return
 
             print("Embedding model not found, falling back to FakeEmbeddings.")
@@ -118,7 +261,28 @@ class RAGSystem:
             if re.match(pattern, text.lower().strip()):
                 return False
 
-        return len(text.split()) >= 5
+        word_count = len(text.split())
+        cjk_char_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+        return word_count >= 5 or cjk_char_count >= 10
+
+    def _min_index_chars(self) -> int:
+        configured = str(os.getenv("RAG_MIN_CHUNK_CHARS", "")).strip()
+        if configured.isdigit():
+            return max(1, int(configured))
+        return MIN_INDEX_CHARS
+
+    def _collect_indexable_docs(self, documents, cleaner):
+        min_chars = self._min_index_chars()
+        processed_docs = []
+        for doc in documents:
+            content = cleaner(doc.page_content)
+            if not content or len(content.strip()) < min_chars:
+                continue
+            if not self._is_academic_content(content):
+                continue
+            doc.page_content = content
+            processed_docs.append(doc)
+        return processed_docs
 
     def setup_vector_store_optimized_fallback(self, documents):
         """Fallback chunking strategy for rebuilding the FAISS index."""
@@ -144,13 +308,20 @@ class RAGSystem:
 
         texts = text_splitter.split_documents(documents)
         processed_texts = []
+        min_chars = self._min_index_chars()
         for text in texts:
             content = clean_text_content(text.page_content)
-            if content and len(content.strip()) >= 50 and self._is_academic_content(content):
+            if content and len(content.strip()) >= min_chars and self._is_academic_content(content):
                 text.page_content = content
                 processed_texts.append(text)
 
         print(f"Fallback chunking finished with {len(processed_texts)} chunks.")
+        if not processed_texts:
+            processed_texts = self._collect_indexable_docs(documents, clean_text_content)
+            print(f"Fallback direct-doc indexing prepared {len(processed_texts)} documents.")
+        if not processed_texts:
+            print("No indexable chunks were produced from ./md. Expand the markdown content and retry.")
+            return None
 
         try:
             from langchain_community.vectorstores import FAISS
@@ -184,6 +355,7 @@ class RAGSystem:
             doc.page_content = clean_arxiv_content(doc.page_content)
 
         documents = [doc for doc in documents if doc.page_content.strip()]
+        min_chars = self._min_index_chars()
 
         try:
             text_splitter = SemanticChunker(
@@ -196,7 +368,7 @@ class RAGSystem:
             processed_texts = []
             for text in texts:
                 content = clean_arxiv_content(text.page_content)
-                if not content or len(content.strip()) < 50:
+                if not content or len(content.strip()) < min_chars:
                     continue
 
                 if len(content) > 1200:
@@ -207,7 +379,7 @@ class RAGSystem:
                     )
                     sub_chunks = secondary_splitter.split_text(content)
                     for sub_chunk in sub_chunks:
-                        if len(sub_chunk.strip()) >= 50 and self._is_academic_content(sub_chunk):
+                        if len(sub_chunk.strip()) >= min_chars and self._is_academic_content(sub_chunk):
                             sub_doc = text.copy()
                             sub_doc.page_content = sub_chunk
                             processed_texts.append(sub_doc)
@@ -216,6 +388,12 @@ class RAGSystem:
                     processed_texts.append(text)
 
             print(f"Semantic chunking finished with {len(processed_texts)} chunks.")
+            if not processed_texts:
+                processed_texts = self._collect_indexable_docs(documents, clean_arxiv_content)
+                print(f"Semantic direct-doc indexing prepared {len(processed_texts)} documents.")
+            if not processed_texts:
+                print("No indexable chunks were produced from ./md. Expand the markdown content and retry.")
+                return None
 
             from langchain_community.vectorstores import FAISS
 

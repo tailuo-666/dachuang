@@ -113,9 +113,12 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             missing_aspects=request.state.get("relevance_missing_aspects") or [],
             final_evidence_raw=request.state.get("final_evidence"),
         )
-        system_message = self._append_system_message(request.system_message, query_plan_text)
-
-        return handler(request.override(system_message=system_message, tools=filtered_tools))
+        updated_request = self._override_model_request(
+            request=request,
+            filtered_tools=filtered_tools,
+            extra_system_text=query_plan_text,
+        )
+        return handler(updated_request)
 
     def wrap_tool_call(
         self,
@@ -263,15 +266,62 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             allowed = set()
         return [tool for tool in tools if getattr(tool, "name", None) in allowed]
 
+    def _override_model_request(
+        self,
+        *,
+        request: ModelRequest,
+        filtered_tools: list[Any],
+        extra_system_text: str,
+    ) -> ModelRequest:
+        overrides: dict[str, Any] = {"tools": filtered_tools}
+
+        request_system_message = getattr(request, "system_message", None)
+        if request_system_message is not None or hasattr(request, "system_message"):
+            overrides["system_message"] = self._append_system_message(request_system_message, extra_system_text)
+            return request.override(**overrides)
+
+        request_system_prompt = getattr(request, "system_prompt", None)
+        if request_system_prompt is not None or hasattr(request, "system_prompt"):
+            overrides["system_prompt"] = self._append_system_prompt(request_system_prompt, extra_system_text)
+            return request.override(**overrides)
+
+        request_messages = list(getattr(request, "messages", []) or [])
+        overrides["messages"] = self._prepend_system_message(request_messages, extra_system_text)
+        return request.override(**overrides)
+
     def _append_system_message(self, system_message: SystemMessage | None, extra_text: str) -> SystemMessage:
         if system_message is not None:
             new_system_content = [
-                *system_message.content_blocks,
+                *self._system_content_blocks(system_message),
                 {"type": "text", "text": f"\n\n{extra_text}"},
             ]
         else:
             new_system_content = [{"type": "text", "text": extra_text}]
         return SystemMessage(content=cast("list[str | dict[str, str]]", new_system_content))
+
+    def _append_system_prompt(self, system_prompt: str | None, extra_text: str) -> str:
+        prompt = str(system_prompt or "").strip()
+        if not prompt:
+            return extra_text
+        return f"{prompt}\n\n{extra_text}"
+
+    def _prepend_system_message(self, messages: list[Any], extra_text: str) -> list[Any]:
+        if messages and isinstance(messages[0], SystemMessage):
+            merged = self._append_system_message(messages[0], extra_text)
+            return [merged, *messages[1:]]
+        return [SystemMessage(content=extra_text), *messages]
+
+    def _system_content_blocks(self, system_message: SystemMessage) -> list[Any]:
+        content_blocks = getattr(system_message, "content_blocks", None)
+        if content_blocks:
+            return list(content_blocks)
+
+        content = getattr(system_message, "content", "")
+        if isinstance(content, list):
+            return list(content)
+        if content:
+            return [{"type": "text", "text": str(content)}]
+        return []
 
     def _build_query_plan_hint(
         self,
