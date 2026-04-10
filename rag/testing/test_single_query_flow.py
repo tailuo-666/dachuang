@@ -1,25 +1,84 @@
 from __future__ import annotations
 
+import argparse
+import csv
+import json
+import os
+import shutil
 import unittest
+import uuid
+from unittest import mock
 
+from langchain_core.embeddings import Embeddings
 from langchain_core.messages import SystemMessage
 
 try:
+    import fitz
+except ModuleNotFoundError:
+    fitz = None
+
+try:
+    from rag.agent.evidence import annotate_local_documents, build_final_evidence_bundle, select_local_evidence
     from rag.agent.middleware import AcademicResearchMiddleware
+    import rag.llm_factory as llm_factory_module
+    import rag.rag_system as rag_system_module
     from rag.crawlers.arxiv import ArxivCrawlerIntegrated
+    from rag.crawlers.standalone import (
+        MissingAspectQueryOptimizer,
+        StandaloneMissingAspectCrawler,
+        apply_runtime_args,
+    )
+    import rag.ocr_client as ocr_client_module
+    from rag.ocr_client import RemoteOCRClient
     from rag.query.optimizer import AcademicQueryPlanner
-    from rag.rag_system import RAGSystem
+    from rag.rag_system import RAGSystem, VLLMOpenAIEmbeddings
     from rag.retrieval.evaluator import evaluate_retrieval
-    from rag.schemas import AcademicQueryPlan, NormalizedDocument
+    from rag.schemas import (
+        AcademicQueryPlan,
+        AspectRewritePayload,
+        FinalEvidenceBundle,
+        FinalEvidenceItem,
+        NormalizedDocument,
+        RetrievalPayload,
+        WebSearchPayload,
+        WebSearchQuery,
+    )
     from rag.testing.fixtures import fake_crawl_papers
 except ImportError:
+    from agent.evidence import annotate_local_documents, build_final_evidence_bundle, select_local_evidence
     from agent.middleware import AcademicResearchMiddleware
+    import llm_factory as llm_factory_module
+    import rag_system as rag_system_module
     from crawlers.arxiv import ArxivCrawlerIntegrated
+    from crawlers.standalone import (
+        MissingAspectQueryOptimizer,
+        StandaloneMissingAspectCrawler,
+        apply_runtime_args,
+    )
+    import ocr_client as ocr_client_module
+    from ocr_client import RemoteOCRClient
     from query.optimizer import AcademicQueryPlanner
-    from rag_system import RAGSystem
+    from rag_system import RAGSystem, VLLMOpenAIEmbeddings
     from retrieval.evaluator import evaluate_retrieval
-    from schemas import AcademicQueryPlan, NormalizedDocument
+    from schemas import (
+        AcademicQueryPlan,
+        AspectRewritePayload,
+        FinalEvidenceBundle,
+        FinalEvidenceItem,
+        NormalizedDocument,
+        RetrievalPayload,
+        WebSearchPayload,
+        WebSearchQuery,
+    )
     from testing.fixtures import fake_crawl_papers
+
+try:
+    from rag.pdf_processor import PDFProcessor
+except ImportError:
+    try:
+        from pdf_processor import PDFProcessor
+    except ImportError:
+        PDFProcessor = None
 
 
 class FakeLLMResponse:
@@ -33,6 +92,30 @@ class FakeLLM:
 
     def invoke(self, _messages):
         return FakeLLMResponse(self.content)
+
+
+class FakeOCRClient:
+    def __init__(self, page_texts: list[str]):
+        self.page_texts = list(page_texts)
+        self.calls: list[str] = []
+
+    def extract_from_image_path(self, image_path: str, *, prompt=None, max_tokens=None):
+        self.calls.append(image_path)
+        text = self.page_texts.pop(0) if self.page_texts else ""
+        return {
+            "text": text,
+            "raw_response": {"choices": [{"message": {"content": text}, "finish_reason": "stop"}]},
+            "finish_reason": "stop",
+        }
+
+    def extract_from_image_bytes(self, payload: bytes, *, mime_type="image/png", prompt=None, max_tokens=None):
+        self.calls.append(f"bytes:{len(payload)}")
+        text = self.page_texts.pop(0) if self.page_texts else ""
+        return {
+            "text": text,
+            "raw_response": {"choices": [{"message": {"content": text}, "finish_reason": "stop"}]},
+            "finish_reason": "stop",
+        }
 
 
 class MiddlewareTool:
@@ -60,7 +143,195 @@ class DummyLangChainDoc:
         self.metadata = {"source": source, **metadata}
 
 
+class MissingAspectQueryOptimizerTests(unittest.TestCase):
+    def test_prompt_invoke_allows_literal_json_example(self):
+        optimizer = MissingAspectQueryOptimizer(llm=object())
+
+        prompt_value = optimizer.prompt.invoke({"aspect": "the definition of RNN"})
+
+        self.assertIn('"original_aspect"', prompt_value.messages[1].content)
+        self.assertIn('Input: definition of LLM', prompt_value.messages[1].content)
+        self.assertIn('"optimized_query_en": "large language models are"', prompt_value.messages[1].content)
+        self.assertIn("Aspect: the definition of RNN", prompt_value.messages[1].content)
+
+    def test_rewrite_returns_llm_optimized_query_and_deduped_keywords(self):
+        fake_json = """
+        {
+          "original_aspect": "the definition of RNN",
+          "optimized_query_en": "recurrent neural network definition",
+          "keywords_en": [
+            "recurrent neural network",
+            "RNN",
+            "recurrent neural network"
+          ]
+        }
+        """
+        optimizer = MissingAspectQueryOptimizer(llm=FakeLLM(fake_json))
+
+        payload = optimizer.rewrite("the definition of RNN")
+
+        self.assertEqual(payload.original_aspect, "the definition of RNN")
+        self.assertEqual(payload.optimized_query_en, "recurrent neural network definition")
+        self.assertEqual(payload.keywords_en, ["recurrent neural network", "RNN"])
+
+    def test_rewrite_falls_back_to_original_aspect_and_warns(self):
+        class ExplodingLLM:
+            def invoke(self, _messages):
+                raise RuntimeError("boom")
+
+        optimizer = MissingAspectQueryOptimizer(llm=ExplodingLLM())
+
+        with mock.patch("builtins.print") as mocked_print:
+            payload = optimizer.rewrite("the definition of CNN")
+
+        self.assertEqual(payload.original_aspect, "the definition of CNN")
+        self.assertEqual(payload.optimized_query_en, "the definition of CNN")
+        self.assertEqual(payload.keywords_en, ["the definition of CNN"])
+        mocked_print.assert_called_once()
+        warning_message = mocked_print.call_args.args[0]
+        self.assertIn("the definition of CNN", warning_message)
+        self.assertIn("RuntimeError", warning_message)
+        self.assertIn("boom", warning_message)
+        self.assertIn("falling back to original aspect", warning_message)
+
+
+class StandaloneCrawlerRewriteFlowTests(unittest.TestCase):
+    def _workspace_tempdir(self, prefix: str) -> str:
+        path = os.path.join(os.getcwd(), f".tmp_{prefix}_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(path, ignore_errors=True))
+        return path
+
+    def test_run_aspects_passes_rewritten_queries_to_arxiv_search(self):
+        class StubPayload:
+            def model_dump(self):
+                return {"status": "success", "message": "ok"}
+
+        class StubCrawler:
+            def __init__(self):
+                self.last_call = None
+
+            def crawl_and_collect(self, **kwargs):
+                self.last_call = kwargs
+                return StubPayload(), None
+
+        output_dir = self._workspace_tempdir("standalone_rewrite_output")
+        md_dir = self._workspace_tempdir("standalone_rewrite_md")
+        queue_path = os.path.join(output_dir, "pending_aspects.json")
+        crawler = StandaloneMissingAspectCrawler(
+            output_dir=output_dir,
+            md_output_dir=md_dir,
+            queue_path=queue_path,
+            llm=object(),
+        )
+        crawler.optimizer = mock.Mock()
+        crawler.optimizer.rewrite.side_effect = [
+            AspectRewritePayload(
+                original_aspect="the definition of RNN",
+                optimized_query_en="recurrent neural network definition",
+                keywords_en=["recurrent neural network", "RNN"],
+            ),
+            AspectRewritePayload(
+                original_aspect="the definition of CNN",
+                optimized_query_en="convolutional neural network definition",
+                keywords_en=["convolutional neural network", "CNN"],
+            ),
+        ]
+        crawler.crawler = StubCrawler()
+
+        result = crawler.run_aspects(
+            ["the definition of RNN", "the definition of CNN"],
+            max_pages=1,
+            auto_ingest=False,
+        )
+
+        self.assertEqual(
+            crawler.crawler.last_call["search_query_overrides"],
+            {
+                "the definition of RNN": "recurrent neural network definition",
+                "the definition of CNN": "convolutional neural network definition",
+            },
+        )
+        self.assertEqual(
+            crawler.crawler.last_call["query_plan"].crawler_query_en,
+            "recurrent neural network definition convolutional neural network definition",
+        )
+        self.assertEqual(
+            result["rewrites"],
+            [
+                {
+                    "original_aspect": "the definition of RNN",
+                    "optimized_query_en": "recurrent neural network definition",
+                    "keywords_en": ["recurrent neural network", "RNN"],
+                },
+                {
+                    "original_aspect": "the definition of CNN",
+                    "optimized_query_en": "convolutional neural network definition",
+                    "keywords_en": ["convolutional neural network", "CNN"],
+                },
+            ],
+        )
+
+
+class StandaloneRuntimeConfigTests(unittest.TestCase):
+    def test_apply_runtime_args_sets_shared_ssh_env_for_llm_ocr_and_embedding(self):
+        args = argparse.Namespace(
+            use_ssh=True,
+            ssh_host="172.26.19.131",
+            ssh_port=8888,
+            ssh_username="root",
+            ssh_password="123456.a",
+            llm_remote_port=8001,
+            llm_local_port=18001,
+            embedding_remote_port=8000,
+            embedding_local_port=18000,
+            ocr_remote_port=8002,
+            ocr_local_port=18002,
+            llm_base_url="http://stale-llm/v1",
+            embedding_base_url="http://stale-embedding/v1",
+            ocr_base_url="http://stale-ocr/v1",
+        )
+
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RAG_LLM_BASE_URL": "http://old-llm/v1",
+                "RAG_EMBEDDING_BASE_URL": "http://old-embedding/v1",
+                "RAG_OCR_BASE_URL": "http://old-ocr/v1",
+            },
+            clear=False,
+        ):
+            apply_runtime_args(args)
+
+            llm_ssh_config = llm_factory_module.get_default_llm_ssh_config()
+            ocr_ssh_config = ocr_client_module.resolve_ocr_ssh_config()
+            embedding_ssh_config = RAGSystem()._resolve_embedding_ssh_config()
+            self.assertEqual(os.environ["RAG_SSH_HOST"], "172.26.19.131")
+            self.assertEqual(os.environ["RAG_SSH_USERNAME"], "root")
+            self.assertEqual(os.environ["RAG_LLM_REMOTE_PORT"], "8001")
+            self.assertEqual(os.environ["RAG_EMBEDDING_REMOTE_PORT"], "8000")
+            self.assertEqual(os.environ["RAG_OCR_REMOTE_PORT"], "8002")
+            self.assertEqual(os.environ.get("RAG_LLM_BASE_URL"), None)
+            self.assertEqual(os.environ.get("RAG_EMBEDDING_BASE_URL"), None)
+            self.assertEqual(os.environ.get("RAG_OCR_BASE_URL"), None)
+            self.assertEqual(llm_ssh_config["ssh_host"], "172.26.19.131")
+            self.assertEqual(llm_ssh_config["remote_port"], 8001)
+            self.assertEqual(ocr_ssh_config["ssh_host"], "172.26.19.131")
+            self.assertEqual(ocr_ssh_config["remote_port"], 8002)
+            self.assertEqual(embedding_ssh_config["ssh_host"], "172.26.19.131")
+            self.assertEqual(embedding_ssh_config["remote_port"], 8000)
+
+
 class QueryPlannerTests(unittest.TestCase):
+    def test_prompt_invoke_allows_literal_json_examples(self):
+        planner = AcademicQueryPlanner(llm=object())
+
+        prompt_value = planner.prompt.invoke({"question": "Transformer和RNN有什么区别"})
+
+        self.assertIn('"original_query"', prompt_value.messages[1].content)
+        self.assertIn('"required_aspects"', prompt_value.messages[1].content)
+        self.assertIn("User question: Transformer和RNN有什么区别", prompt_value.messages[1].content)
+
     def test_build_query_plan_for_chinese_query(self):
         fake_json = """
         {
@@ -122,6 +393,129 @@ class QueryPlannerTests(unittest.TestCase):
         plan = planner.build("Transformer 为什么比 RNN 好？")
         self.assertEqual(len(plan.required_aspects), 5)
         self.assertEqual(plan.required_aspects[0], "Transformer是什么")
+
+
+class MiddlewarePromptBudgetTests(unittest.TestCase):
+    def setUp(self):
+        fake_json = """
+        {
+          "original_query": "如何比较 fading memory 和 HA-GNN？",
+          "normalized_query_zh": "如何比较 fading memory 和 HA-GNN？",
+          "retrieval_query_zh": "fading memory HA-GNN 历史访问 比较",
+          "retrieval_query_en": "fading memory HA-GNN historical access comparison",
+          "crawler_query_en": "fading memory HA-GNN historical access comparison",
+          "keywords_zh": ["fading memory", "HA-GNN", "历史访问"],
+          "keywords_en": ["fading memory", "HA-GNN", "historical access"],
+          "required_aspects": ["fading memory definition", "HA-GNN mechanism"]
+        }
+        """
+        self.middleware = AcademicResearchMiddleware(
+            FakeLLM(fake_json),
+            retrieve_tool_name="retrieve_local_kb",
+            web_search_tool_name="search_web_with_tavily",
+        )
+
+    def test_prompt_friendly_final_evidence_truncates_and_limits_items(self):
+        long_content = "A" * 4000
+        bundle = FinalEvidenceBundle(
+            query="compare fading memory and HA-GNN",
+            summary="summary",
+            local_evidence=[
+                FinalEvidenceItem(
+                    origin="local_kb",
+                    content=long_content,
+                    source="local_1",
+                    title="Local 1",
+                    url="https://example.com/local-1",
+                    aspects=["fading memory"],
+                )
+            ],
+            web_evidence=[
+                FinalEvidenceItem(
+                    origin="tavily_web",
+                    content=long_content,
+                    source=f"web_{idx}",
+                    title=f"Web {idx}",
+                    url=f"https://example.com/web-{idx}",
+                    aspects=["HA-GNN"],
+                )
+                for idx in range(1, 8)
+            ],
+            uncovered_aspects=["difference"],
+        )
+
+        compact_text = self.middleware._build_prompt_friendly_final_evidence(bundle)
+        compact = json.loads(compact_text)
+
+        self.assertEqual(len(compact["local_evidence"]), 1)
+        self.assertEqual(len(compact["web_evidence"]), self.middleware.PROMPT_WEB_EVIDENCE_MAX_ITEMS)
+        self.assertIn("content_excerpt", compact["local_evidence"][0])
+        self.assertNotIn('"content":', compact_text)
+        self.assertTrue(
+            compact["local_evidence"][0]["content_excerpt"].endswith("...(truncated)")
+        )
+
+    def test_tool_summaries_stay_compact(self):
+        long_content = "B" * 3000
+        retrieval_payload = RetrievalPayload(
+            status="success",
+            message="ok",
+            query="fading memory",
+            doc_count=5,
+            docs=[],
+        )
+        local_items = [
+            FinalEvidenceItem(
+                origin="local_kb",
+                content=long_content,
+                source="local",
+                title="Local",
+                url="https://example.com/local",
+                aspects=["fading memory"],
+            )
+        ]
+        retrieval_summary = self.middleware._build_retrieval_tool_summary(
+            payload=retrieval_payload,
+            local_evidence=local_items,
+            missing_aspects=["mechanism of historical access in HA-GNN"],
+            next_action="search_web",
+        )
+
+        web_payload = WebSearchPayload(
+            status="partial_success",
+            message="web ok",
+            requested_missing_aspects=["fading memory", "HA-GNN"],
+            covered_missing_aspects=["fading memory"],
+            uncovered_missing_aspects=["HA-GNN"],
+            search_queries=[WebSearchQuery(aspect="fading memory", query="fading memory")],
+            results=[],
+            evidence_docs=[],
+        )
+        final_bundle = FinalEvidenceBundle(
+            query="compare",
+            summary="summary",
+            local_evidence=[],
+            web_evidence=[
+                FinalEvidenceItem(
+                    origin="tavily_web",
+                    content=long_content,
+                    source="web",
+                    title="Web",
+                    url="https://example.com/web",
+                    aspects=["HA-GNN"],
+                )
+            ],
+            uncovered_aspects=["HA-GNN"],
+        )
+        web_summary = self.middleware._build_web_search_tool_summary(
+            payload=web_payload,
+            final_bundle=final_bundle,
+        )
+
+        self.assertLess(len(retrieval_summary), 2000)
+        self.assertLess(len(web_summary), 2000)
+        self.assertNotIn(long_content, retrieval_summary)
+        self.assertNotIn(long_content, web_summary)
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
@@ -238,6 +632,12 @@ class RetrievalEvaluationTests(unittest.TestCase):
 
 
 class ArxivCrawlerTests(unittest.TestCase):
+    def _workspace_tempdir(self, prefix: str) -> str:
+        path = os.path.join(os.getcwd(), f".tmp_{prefix}_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(path, ignore_errors=True))
+        return path
+
     def test_search_query_uses_keywords(self):
         crawler = ArxivCrawlerIntegrated("./paper_results")
         query = crawler.generate_search_query(
@@ -253,6 +653,467 @@ class ArxivCrawlerTests(unittest.TestCase):
         self.assertEqual(len(docs), 1)
         self.assertIn("Abstract:", docs[0].content)
 
+    def test_download_papers_writes_pdf_sidecar(self):
+        class StubCrawler(ArxivCrawlerIntegrated):
+            def download_paper(self, paper_link: str, filepath: str) -> bool:
+                with open(filepath, "wb") as file:
+                    file.write(b"%PDF-1.4 dummy")
+                return True
+
+        output_dir = self._workspace_tempdir("download_sidecar")
+        crawler = StubCrawler(output_dir)
+        count = crawler.download_papers(
+            papers=[{"title": "Sample Paper", "pdf_link": "https://arxiv.org/pdf/2501.00001"}],
+            max_downloads=1,
+        )
+
+        self.assertEqual(count, 1)
+        sidecar_path = os.path.join(output_dir, "Sample Paper.metadata.json")
+        with open(sidecar_path, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+
+        self.assertEqual(payload["title"], "Sample Paper")
+        self.assertEqual(payload["url"], "https://arxiv.org/pdf/2501.00001")
+        self.assertEqual(payload["pdf_link"], "https://arxiv.org/pdf/2501.00001")
+        self.assertEqual(payload["origin"], "local_kb")
+
+
+class LocalMetadataPropagationTests(unittest.TestCase):
+    def _workspace_tempdir(self, prefix: str) -> str:
+        path = os.path.join(os.getcwd(), f".tmp_{prefix}_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(path, ignore_errors=True))
+        return path
+
+    def _create_pdf(self, path: str, text: str, *, title: str = "") -> None:
+        if fitz is None:
+            raise unittest.SkipTest("fitz is not available in the current test environment")
+        doc = fitz.open()
+        page = doc.new_page()
+        page.insert_text((72, 72), text)
+        if title:
+            doc.set_metadata({"title": title})
+        doc.save(path)
+        doc.close()
+
+    def test_pdf_processor_writes_md_sidecar_from_csv_fallback(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+        pdf_dir = self._workspace_tempdir("pdf_input")
+        md_dir = self._workspace_tempdir("md_output")
+        pdf_path = os.path.join(pdf_dir, "Sample Paper.pdf")
+        self._create_pdf(
+            pdf_path,
+            "Sample paper content with enough academic context to survive indexing filters.",
+        )
+
+        manifest_path = os.path.join(pdf_dir, "paper_result.csv")
+        with open(manifest_path, "w", newline="", encoding="utf-8") as csvfile:
+            writer = csv.DictWriter(
+                csvfile,
+                fieldnames=["title", "authors", "abstract", "submission_date", "pdf_link"],
+            )
+            writer.writeheader()
+            writer.writerow(
+                {
+                    "title": "Sample Paper",
+                    "authors": "Alice",
+                    "abstract": "Abstract",
+                    "submission_date": "2025-01-01",
+                    "pdf_link": "https://arxiv.org/pdf/2501.00001",
+                }
+            )
+
+        processor = PDFProcessor(
+            output_dir=md_dir,
+            lang="en",
+            dpi=72,
+            ocr_client=FakeOCRClient(
+                [
+                    "Sample Paper<|LOC_1|>\nAbstract\nSample paper content with enough academic context.",
+                ]
+            ),
+        )
+        processed_files = processor.process_pdf_folder(pdf_dir)
+
+        self.assertEqual(len(processed_files), 1)
+        sidecar_path = os.path.join(md_dir, "Sample Paper.metadata.json")
+        with open(sidecar_path, "r", encoding="utf-8") as file:
+            payload = json.load(file)
+
+        self.assertEqual(payload["title"], "Sample Paper")
+        self.assertEqual(payload["url"], "https://arxiv.org/pdf/2501.00001")
+        self.assertEqual(payload["pdf_link"], "https://arxiv.org/pdf/2501.00001")
+        self.assertEqual(payload["origin"], "local_kb")
+        with open(os.path.join(md_dir, "Sample Paper.md"), "r", encoding="utf-8") as file:
+            md_content = file.read()
+        self.assertIn("Sample Paper", md_content)
+        self.assertNotIn("<|LOC_", md_content)
+
+    def test_load_md_documents_merges_sidecar_metadata(self):
+        md_dir = self._workspace_tempdir("md_sidecar")
+        md_path = os.path.join(md_dir, "paper.md")
+        with open(md_path, "w", encoding="utf-8") as file:
+            file.write("A local paper chunk.")
+        sidecar_path = os.path.join(md_dir, "paper.metadata.json")
+        with open(sidecar_path, "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "title": "Paper Title",
+                    "url": "https://example.com/paper.pdf",
+                    "pdf_link": "https://example.com/paper.pdf",
+                    "source_file": "paper.pdf",
+                    "origin": "local_kb",
+                },
+                file,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        original_md_folder = rag_system_module.MD_OUTPUT_FOLDER
+        rag_system_module.MD_OUTPUT_FOLDER = md_dir
+        try:
+            rag_system = RAGSystem()
+            docs = rag_system.load_md_documents()
+        finally:
+            rag_system_module.MD_OUTPUT_FOLDER = original_md_folder
+
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0].metadata["title"], "Paper Title")
+        self.assertEqual(docs[0].metadata["url"], "https://example.com/paper.pdf")
+        self.assertEqual(docs[0].metadata["pdf_link"], "https://example.com/paper.pdf")
+        self.assertEqual(docs[0].metadata["source"], "Paper Title")
+        self.assertEqual(docs[0].metadata["source_file"], "paper.pdf")
+
+    def test_load_md_documents_falls_back_without_sidecar(self):
+        md_dir = self._workspace_tempdir("md_plain")
+        md_path = os.path.join(md_dir, "plain_doc.md")
+        with open(md_path, "w", encoding="utf-8") as file:
+            file.write("Plain local content.")
+
+        original_md_folder = rag_system_module.MD_OUTPUT_FOLDER
+        rag_system_module.MD_OUTPUT_FOLDER = md_dir
+        try:
+            rag_system = RAGSystem()
+            docs = rag_system.load_md_documents()
+        finally:
+            rag_system_module.MD_OUTPUT_FOLDER = original_md_folder
+
+        self.assertEqual(len(docs), 1)
+        self.assertEqual(docs[0].metadata["title"], "plain_doc")
+        self.assertEqual(docs[0].metadata["url"], "")
+        self.assertEqual(docs[0].metadata["source"], "plain_doc")
+        self.assertEqual(docs[0].metadata["source_file"], "plain_doc.md")
+
+    def test_local_final_evidence_keeps_title_and_url(self):
+        plan = AcademicQueryPlan(
+            original_query="What is local retrieval?",
+            normalized_query_zh="本地检索是什么？",
+            retrieval_query_zh="本地 检索 定义",
+            retrieval_query_en="definition of local retrieval",
+            crawler_query_en="local retrieval definition",
+            keywords_zh=["本地检索", "定义"],
+            keywords_en=["local retrieval", "definition"],
+            required_aspects=["definition of local retrieval"],
+        )
+        docs = [
+            NormalizedDocument(
+                content="Definition of local retrieval in a paper-backed RAG system.",
+                source="sample_paper.md",
+                score=None,
+                metadata={
+                    "title": "Local Retrieval Paper",
+                    "url": "https://example.com/local-retrieval.pdf",
+                    "pdf_link": "https://example.com/local-retrieval.pdf",
+                    "origin": "local_kb",
+                },
+            )
+        ]
+
+        evaluation = evaluate_retrieval(plan, docs)
+        annotated_docs = annotate_local_documents(evaluation.scored_docs, evaluation)
+        local_evidence = select_local_evidence(annotated_docs)
+        final_bundle = build_final_evidence_bundle(
+            query=plan.original_query,
+            local_evidence=local_evidence,
+            web_evidence=[],
+            uncovered_aspects=[],
+            note="local evidence is sufficient for answering",
+        )
+
+        self.assertEqual(len(final_bundle.local_evidence), 1)
+        item = final_bundle.local_evidence[0]
+        self.assertEqual(item.title, "Local Retrieval Paper")
+        self.assertEqual(item.url, "https://example.com/local-retrieval.pdf")
+        self.assertEqual(item.origin, "local_kb")
+        self.assertEqual(item.aspects, ["definition of local retrieval"])
+
+
+class RAGChunkingTests(unittest.TestCase):
+    def test_semantic_chunking_pre_splits_long_docs_before_embedding(self):
+        rag_system = RAGSystem()
+        rag_system.embeddings = object()
+        long_text = "Recurrent neural networks are sequence models with hidden states. " * 220
+        documents = [DummyLangChainDoc(long_text, "sample.md", title="Sample Paper")]
+        semantic_input_lengths: list[int] = []
+
+        class FakeSemanticChunker:
+            def __init__(self, _embeddings, breakpoint_threshold_type=None, breakpoint_threshold_amount=None):
+                self.breakpoint_threshold_type = breakpoint_threshold_type
+                self.breakpoint_threshold_amount = breakpoint_threshold_amount
+
+            def split_documents(self, docs):
+                semantic_input_lengths.extend(len(doc.page_content) for doc in docs)
+                return [DummyLangChainDoc("Short academic chunk for indexing.", "sample.md", title="Sample Paper")]
+
+        class FakeVectorStore:
+            def __init__(self):
+                self.saved_paths: list[str] = []
+
+            def save_local(self, path: str):
+                self.saved_paths.append(path)
+
+        fake_vectorstore = FakeVectorStore()
+
+        with mock.patch.object(rag_system_module, "SemanticChunker", FakeSemanticChunker):
+            with mock.patch("langchain_community.vectorstores.FAISS.from_documents", return_value=fake_vectorstore):
+                vectorstore = rag_system.setup_vector_store_semantic_arxiv(documents)
+
+        self.assertIs(vectorstore, fake_vectorstore)
+        self.assertGreater(len(semantic_input_lengths), 1)
+        self.assertTrue(
+            all(length <= rag_system_module.SEMANTIC_PRECHUNK_SIZE for length in semantic_input_lengths)
+        )
+        self.assertEqual(fake_vectorstore.saved_paths, ["./faiss"])
+
+
+class RemoteOCRClientTests(unittest.TestCase):
+    def _mock_response(self, payload):
+        response = mock.Mock()
+        response.raise_for_status.return_value = None
+        response.json.return_value = payload
+        return response
+
+    def test_extract_from_data_url_retries_when_finish_reason_is_length(self):
+        client = RemoteOCRClient(
+            base_url="http://127.0.0.1:18002/v1",
+            model="paddle-ocr-vl",
+            api_key="EMPTY",
+            max_tokens=512,
+            retry_max_tokens=1024,
+        )
+        first_payload = {
+            "choices": [
+                {
+                    "message": {"content": "partial text"},
+                    "finish_reason": "length",
+                }
+            ]
+        }
+        second_payload = {
+            "choices": [
+                {
+                    "message": {"content": "complete text"},
+                    "finish_reason": "stop",
+                }
+            ]
+        }
+        with mock.patch.object(
+            ocr_client_module.requests,
+            "post",
+            side_effect=[self._mock_response(first_payload), self._mock_response(second_payload)],
+        ) as mocked_post:
+            result = client.extract_from_data_url("data:image/png;base64,AAA")
+
+        self.assertEqual(result["text"], "complete text")
+        self.assertEqual(mocked_post.call_count, 2)
+        self.assertEqual(mocked_post.call_args_list[0].kwargs["json"]["max_tokens"], 512)
+        self.assertEqual(mocked_post.call_args_list[1].kwargs["json"]["max_tokens"], 1024)
+        image_item = mocked_post.call_args_list[0].kwargs["json"]["messages"][1]["content"][1]
+        self.assertEqual(image_item["image_url"]["url"], "data:image/png;base64,AAA")
+
+
+class PDFProcessorOCRCleaningTests(unittest.TestCase):
+    def _workspace_tempdir(self, prefix: str) -> str:
+        path = os.path.join(os.getcwd(), f".tmp_{prefix}_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(path, ignore_errors=True))
+        return path
+
+    def _create_multi_page_pdf(self, path: str, page_count: int) -> None:
+        if fitz is None:
+            raise unittest.SkipTest("fitz is not available in the current test environment")
+        doc = fitz.open()
+        for index in range(page_count):
+            page = doc.new_page()
+            page.insert_text((72, 72), f"Placeholder page {index + 1}")
+        doc.save(path)
+        doc.close()
+
+    def test_pdf_processor_cleans_remote_ocr_output(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        pdf_dir = self._workspace_tempdir("ocr_pdf_input")
+        md_dir = self._workspace_tempdir("ocr_md_output")
+        pdf_path = os.path.join(pdf_dir, "OCR Sample.pdf")
+        self._create_multi_page_pdf(pdf_path, 3)
+
+        processor = PDFProcessor(
+            output_dir=md_dir,
+            lang="en",
+            dpi=72,
+            ocr_client=FakeOCRClient(
+                [
+                    (
+                        "Conference 2025\n"
+                        "A C-LSTM Neural Network for Text Classification<|LOC_245|>\n"
+                        "Chunting Zhou\\(1\\)\n"
+                        "Abstract\n"
+                        "Neural network models have been demon-\n"
+                        "strated to be capable.\n"
+                        "1"
+                    ),
+                    "Conference 2025\nIntroduction\nThis is page two body text.\n2",
+                    "Conference 2025\nConclusion\nThe model works well.\n3",
+                ]
+            ),
+        )
+
+        result = processor.process_pdf(pdf_path)
+
+        self.assertTrue(os.path.exists(result["md_path"]))
+        with open(result["md_path"], "r", encoding="utf-8") as file:
+            md_content = file.read()
+
+        self.assertNotIn("<|LOC_", md_content)
+        self.assertNotIn("Conference 2025", md_content)
+        self.assertNotIn("demon-\nstrated", md_content)
+        self.assertIn("demonstrated to be capable.", md_content)
+        self.assertIn("Chunting Zhou(1)", md_content)
+
+
+class StandaloneCrawlerIngestionTests(unittest.TestCase):
+    def _workspace_tempdir(self, prefix: str) -> str:
+        path = os.path.join(os.getcwd(), f".tmp_{prefix}_{uuid.uuid4().hex}")
+        os.makedirs(path, exist_ok=True)
+        self.addCleanup(lambda: shutil.rmtree(path, ignore_errors=True))
+        return path
+
+    def test_execute_ingestion_job_dedupes_and_rebuilds_once(self):
+        class StubCrawler(ArxivCrawlerIntegrated):
+            def download_paper(self, paper_link: str, filepath: str) -> bool:
+                with open(filepath, "wb") as file:
+                    file.write(b"%PDF-1.4 dummy")
+                return True
+
+        class FakePDFProcessorForIngest:
+            def __init__(self, output_dir: str):
+                self.output_dir = output_dir
+                self.processed: list[str] = []
+
+            def process_pdf(self, pdf_path: str):
+                base_name = os.path.splitext(os.path.basename(pdf_path))[0]
+                md_path = os.path.join(self.output_dir, f"{base_name}.md")
+                with open(md_path, "w", encoding="utf-8") as file:
+                    file.write(f"OCR content for {base_name}")
+                sidecar_path = os.path.join(self.output_dir, f"{base_name}.metadata.json")
+                with open(sidecar_path, "w", encoding="utf-8") as file:
+                    json.dump(
+                        {
+                            "title": base_name,
+                            "url": f"https://example.com/{base_name}.pdf",
+                            "pdf_link": f"https://example.com/{base_name}.pdf",
+                            "source_file": f"{base_name}.pdf",
+                            "origin": "local_kb",
+                        },
+                        file,
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                self.processed.append(pdf_path)
+                return {"md_path": md_path}
+
+        class FakeRAGSystem:
+            def __init__(self):
+                self.embeddings = object()
+                self.update_calls = 0
+                self.chunk_strategy = ""
+
+            def setup_embeddings(self):
+                self.embeddings = object()
+
+            def update_rag_system(self, chunk_strategy="semantic_arxiv"):
+                self.update_calls += 1
+                self.chunk_strategy = chunk_strategy
+                return True
+
+        output_dir = self._workspace_tempdir("crawler_output")
+        md_dir = self._workspace_tempdir("crawler_md")
+
+        with open(os.path.join(output_dir, "Existing Download.metadata.json"), "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "title": "Existing Download",
+                    "url": "https://arxiv.org/pdf/existing-download.pdf",
+                    "pdf_link": "https://arxiv.org/pdf/existing-download.pdf",
+                },
+                file,
+                ensure_ascii=False,
+                indent=2,
+            )
+        with open(os.path.join(md_dir, "existing-md.metadata.json"), "w", encoding="utf-8") as file:
+            json.dump(
+                {
+                    "title": "Existing MD",
+                    "url": "https://arxiv.org/pdf/existing-md.pdf",
+                    "pdf_link": "https://arxiv.org/pdf/existing-md.pdf",
+                    "source_file": "existing-md.pdf",
+                    "origin": "local_kb",
+                },
+                file,
+                ensure_ascii=False,
+                indent=2,
+            )
+
+        ingestion_job = {
+            "all_papers": [],
+            "selected_papers": [],
+            "ingest_papers": [
+                {"title": "Existing Download", "pdf_link": "https://arxiv.org/pdf/existing-download.pdf"},
+                {"title": "Existing MD", "pdf_link": "https://arxiv.org/pdf/existing-md.pdf"},
+                {"title": "New Paper 1", "pdf_link": "https://arxiv.org/pdf/new-paper-1.pdf"},
+                {"title": "New Paper 2", "pdf_link": "https://arxiv.org/pdf/new-paper-2.pdf"},
+                {"title": "New Paper 3", "pdf_link": "https://arxiv.org/pdf/new-paper-3.pdf"},
+                {"title": "New Paper 4", "pdf_link": "https://arxiv.org/pdf/new-paper-4.pdf"},
+                {"title": "New Paper 5", "pdf_link": "https://arxiv.org/pdf/new-paper-5.pdf"},
+                {"title": "New Paper 6", "pdf_link": "https://arxiv.org/pdf/new-paper-6.pdf"},
+            ],
+            "manifest_csv": "paper_result.csv",
+            "manifest_txt": "formatted_papers.txt",
+        }
+
+        fake_processor = FakePDFProcessorForIngest(md_dir)
+        fake_rag_system = FakeRAGSystem()
+        crawler = StubCrawler(output_dir)
+        result = crawler.execute_ingestion_job(
+            ingestion_job,
+            md_output_dir=md_dir,
+            max_new_papers=5,
+            pdf_processor=fake_processor,
+            rag_system=fake_rag_system,
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(result["selected_new_paper_count"], 5)
+        self.assertEqual(result["skipped_duplicate_count"], 2)
+        self.assertEqual(result["download_success_count"], 5)
+        self.assertEqual(result["ocr_success_count"], 5)
+        self.assertEqual(result["md_written_count"], 5)
+        self.assertTrue(result["rebuild_success"])
+        self.assertEqual(fake_rag_system.update_calls, 1)
+        self.assertEqual(fake_rag_system.chunk_strategy, "semantic_arxiv")
+        self.assertEqual(len(fake_processor.processed), 5)
 
 class MiddlewareFilteringTests(unittest.TestCase):
     def setUp(self):
@@ -408,6 +1269,22 @@ class HybridRetrievalTests(unittest.TestCase):
         self.assertEqual(debug["branch_counts"]["dense_zh"], 15)
         self.assertEqual(debug["branch_counts"]["dense_en"], 15)
         self.assertEqual(debug["rrf_pool_count"], 20)
+
+
+class EmbeddingCompatibilityTests(unittest.TestCase):
+    def test_vllm_openai_embeddings_implements_langchain_embeddings_interface(self):
+        embeddings = VLLMOpenAIEmbeddings(base_url="http://127.0.0.1:18000/v1", model="bge-m3")
+
+        self.assertIsInstance(embeddings, Embeddings)
+
+    def test_vllm_openai_embeddings_callable_delegates_to_embed_query(self):
+        embeddings = VLLMOpenAIEmbeddings(base_url="http://127.0.0.1:18000/v1", model="bge-m3")
+
+        with mock.patch.object(embeddings, "embed_query", return_value=[0.1, 0.2]) as mocked_embed_query:
+            result = embeddings("diagnostic query")
+
+        self.assertEqual(result, [0.1, 0.2])
+        mocked_embed_query.assert_called_once_with("diagnostic query")
 
 
 if __name__ == "__main__":

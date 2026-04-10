@@ -49,6 +49,11 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
     """Plan the query before the agent starts and enforce retrieval-first execution."""
 
     state_schema = ResearchState
+    PROMPT_LOCAL_EVIDENCE_MAX_ITEMS = 3
+    PROMPT_WEB_EVIDENCE_MAX_ITEMS = 5
+    PROMPT_EVIDENCE_CONTENT_MAX_CHARS = 900
+    TOOL_SUMMARY_EVIDENCE_MAX_ITEMS = 4
+    TOOL_SUMMARY_CONTENT_MAX_CHARS = 260
 
     def __init__(self, llm, retrieve_tool_name: str, web_search_tool_name: str) -> None:
         super().__init__()
@@ -168,7 +173,12 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
-                content=payload.model_dump_json(),
+                content=self._build_retrieval_tool_summary(
+                    payload=payload,
+                    local_evidence=local_evidence,
+                    missing_aspects=evaluation.missing_aspects,
+                    next_action="answer" if evaluation.sufficient else "search_web",
+                ),
                 tool_call_id=result.tool_call_id,
                 name=result.name,
                 status=result.status,
@@ -228,7 +238,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
-                content=payload.model_dump_json(),
+                content=self._build_web_search_tool_summary(payload=payload, final_bundle=final_bundle),
                 tool_call_id=result.tool_call_id,
                 name=result.name,
                 status=result.status,
@@ -362,9 +372,9 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         if final_evidence_raw:
             try:
                 final_evidence = FinalEvidenceBundle(**final_evidence_raw)
-                final_evidence_text = json.dumps(final_evidence.model_dump(), ensure_ascii=False, indent=2)
+                final_evidence_text = self._build_prompt_friendly_final_evidence(final_evidence)
             except Exception:
-                final_evidence_text = json.dumps(final_evidence_raw, ensure_ascii=False, indent=2)
+                final_evidence_text = self._build_prompt_friendly_final_evidence(final_evidence_raw)
 
         return (
             "## Academic Query Plan\n"
@@ -387,6 +397,89 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             " 请优先按 aspect 组织回答，明确区分 local_kb 与 tavily_web。"
             " 如果 uncovered_aspects 非空，必须明确指出仍未覆盖的点。"
         )
+
+    def _build_retrieval_tool_summary(
+        self,
+        *,
+        payload: RetrievalPayload,
+        local_evidence: list[Any],
+        missing_aspects: list[str],
+        next_action: str,
+    ) -> str:
+        summary = {
+            "kind": "retrieval_result_summary",
+            "status": payload.status,
+            "message": payload.message,
+            "query": payload.query,
+            "doc_count": payload.doc_count,
+            "next_action": next_action,
+            "missing_aspects": list(missing_aspects[:5]),
+            "selected_local_evidence": [
+                self._compact_evidence_item(item, content_max_chars=self.TOOL_SUMMARY_CONTENT_MAX_CHARS)
+                for item in local_evidence[: self.TOOL_SUMMARY_EVIDENCE_MAX_ITEMS]
+            ],
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
+    def _build_web_search_tool_summary(
+        self,
+        *,
+        payload: WebSearchPayload,
+        final_bundle: FinalEvidenceBundle,
+    ) -> str:
+        summary = {
+            "kind": "web_search_result_summary",
+            "status": payload.status,
+            "message": payload.message,
+            "requested_missing_aspects": list(payload.requested_missing_aspects[:5]),
+            "covered_missing_aspects": list(payload.covered_missing_aspects[:5]),
+            "uncovered_missing_aspects": list(payload.uncovered_missing_aspects[:5]),
+            "search_queries": [item.query for item in payload.search_queries[:5]],
+            "selected_web_evidence": [
+                self._compact_evidence_item(item, content_max_chars=self.TOOL_SUMMARY_CONTENT_MAX_CHARS)
+                for item in final_bundle.web_evidence[: self.TOOL_SUMMARY_EVIDENCE_MAX_ITEMS]
+            ],
+        }
+        return json.dumps(summary, ensure_ascii=False)
+
+    def _build_prompt_friendly_final_evidence(self, bundle_like: FinalEvidenceBundle | dict[str, Any]) -> str:
+        bundle = bundle_like if isinstance(bundle_like, FinalEvidenceBundle) else FinalEvidenceBundle(**bundle_like)
+        prompt_bundle = {
+            "query": bundle.query,
+            "summary": bundle.summary,
+            "local_evidence": [
+                self._compact_evidence_item(item, content_max_chars=self.PROMPT_EVIDENCE_CONTENT_MAX_CHARS)
+                for item in bundle.local_evidence[: self.PROMPT_LOCAL_EVIDENCE_MAX_ITEMS]
+            ],
+            "web_evidence": [
+                self._compact_evidence_item(item, content_max_chars=self.PROMPT_EVIDENCE_CONTENT_MAX_CHARS)
+                for item in bundle.web_evidence[: self.PROMPT_WEB_EVIDENCE_MAX_ITEMS]
+            ],
+            "uncovered_aspects": list(bundle.uncovered_aspects[:8]),
+            "note": (
+                "Evidence content below is excerpted and truncated for prompt budget control. "
+                "Prefer these items over raw tool payloads."
+            ),
+        }
+        return json.dumps(prompt_bundle, ensure_ascii=False, indent=2)
+
+    def _compact_evidence_item(self, item: Any, *, content_max_chars: int) -> dict[str, Any]:
+        evidence = item if isinstance(item, dict) else item.model_dump()
+        content = self._truncate_text(str(evidence.get("content") or "").strip(), content_max_chars)
+        return {
+            "origin": str(evidence.get("origin") or "").strip(),
+            "title": str(evidence.get("title") or "").strip(),
+            "url": str(evidence.get("url") or "").strip(),
+            "aspects": list(evidence.get("aspects") or [])[:6],
+            "score": evidence.get("score"),
+            "content_excerpt": content,
+        }
+
+    def _truncate_text(self, text: str, max_chars: int) -> str:
+        normalized = " ".join(str(text or "").split())
+        if len(normalized) <= max_chars:
+            return normalized
+        return normalized[:max_chars].rstrip() + "...(truncated)"
 
     def _extract_latest_user_query(self, state: ResearchState) -> str:
         for message in reversed(state["messages"]):

@@ -94,7 +94,7 @@ class AcademicQueryPlanner:
                     "human",
                     """
 Return strict JSON with exactly these fields:
-{
+{{
   "original_query": "...",
   "normalized_query_zh": "...",
   "retrieval_query_zh": "...",
@@ -103,7 +103,7 @@ Return strict JSON with exactly these fields:
   "keywords_zh": ["..."],
   "keywords_en": ["..."],
   "required_aspects": ["..."]
-}
+}}
 
 Rules:
 1. `normalized_query_zh` should be a polished Chinese version of the original intent.
@@ -127,7 +127,7 @@ Rules:
 15. Do not output markdown. Do not output explanations.
 
 Example:
-{
+{{
   "original_query": "Transformer 为什么比 RNN 好？",
   "normalized_query_zh": "Transformer 相比 RNN 的优势来源是什么？",
   "retrieval_query_zh": "Transformer RNN 区别 优势 原因",
@@ -141,7 +141,7 @@ Example:
     "differences between Transformer and RNN",
     "advantages of Transformer over RNN"
   ]
-}
+}}
 
 User question: {question}
                     """.strip(),

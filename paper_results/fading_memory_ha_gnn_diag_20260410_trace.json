@@ -1,0 +1,700 @@
+{
+  "query_source": {
+    "source": "query_file",
+    "path": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\fading_memory_ha_gnn_query.txt"
+  },
+  "query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "default_query_reference": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "runtime": {
+    "cwd": "C:\\Users\\jack\\Desktop\\demo",
+    "repo_root": "C:\\Users\\jack\\Desktop\\demo",
+    "timestamp": "2026-04-10T09:07:08.163348",
+    "llm": {
+      "scheme": "http",
+      "host": "127.0.0.1",
+      "port": 8001,
+      "model": "Qwen/Qwen3.5-9B",
+      "api_key": "EMPTY",
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8001,
+        "local_host": "127.0.0.1",
+        "local_port": 18001
+      },
+      "base_url": "http://127.0.0.1:18001/v1"
+    },
+    "embedding": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8000,
+        "local_host": "127.0.0.1",
+        "local_port": 18000
+      },
+      "base_url": "http://127.0.0.1:18000/v1",
+      "model": "bge-m3"
+    },
+    "ocr": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8002,
+        "local_host": "127.0.0.1",
+        "local_port": 18002
+      },
+      "base_url": "http://127.0.0.1:18002/v1",
+      "model": ""
+    }
+  },
+  "optimizer": {
+    "input_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "input_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "cjk_count": 48,
+      "latin_count": 17,
+      "length": 73
+    },
+    "planner_input_question": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "prompt_human_message_excerpt": "Return strict JSON with exactly these fields:\n{\n  \"original_query\": \"...\",\n  \"normalized_query_zh\": \"...\",\n  \"retrieval_query_zh\": \"...\",\n  \"retrieval_query_en\": \"...\",\n  \"crawler_query_en\": \"...\",\n  \"keywords_zh\": [\"...\"],\n  \"keywords_en\": [\"...\"],\n  \"required_aspects\": [\"...\"]\n}\n\nRules:\n1. `normalized_query_zh` should be a polished Chinese version of the original intent.\n2. `retrieval_query_zh` is for local Chinese retrieval and should stay concise and natural.\n3. `retrieval_query_en` is for semantic retrieval and must preserve the original meaning instead of literal word-by-word translation.\n4. `crawler_query_en` is only a short fallback academic search string for title/abstract search.\n5. `keywords_zh` and `keywords_en` must be deduplicated and ordered by importance.\n6. `required_aspects` is the most important field. It must be English search-ready noun phrases, not sentences, and at most 5 items.\n7. Every required aspect must be independently searchable and independently judgeable later.\n8. Prefer aspects framed as definition, mechanism, difference, reason, method, limitation, or evidence.\n9. For comparison questions such as \"why A is better than B\", prefer:\n   - definition of A\n   - definition of B\n   - differences between A and B\n   - advantages of A over B\n10. Preserve standard English academic terms and abbreviations such as RAG, LLM, BM25, OCR, and arXiv.\n11. Avoid invented translations. Keep standard English terms when they are known.\n12. `keywords_en` should prefer academic phrases such as \"query rewriting\", \"information retrieval\", and \"question answering\".\n13....(truncated)",
+    "raw_response": "\n\n{\n  \"original_query\": \"fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？\",\n  \"normalized_query_zh\": \"动态系统中衰减记忆性质的作用与HA-GNN模型历史访问预测机制的相似性及本质区别分析\",\n  \"retrieval_query_zh\": \"动态系统 衰减记忆 HA-GNN 历史访问 预测机制 对比\",\n  \"retrieval_query_en\": \"comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms\",\n  \"crawler_query_en\": \"fading memory dynamic systems HA-GNN history attention\",\n  \"keywords_zh\": [\n    \"HA-GNN\",\n    \"动态系统\",\n    \"衰减记忆\",\n    \"历史访问信息\",\n    \"预测机制\"\n  ],\n  \"keywords_en\": [\n    \"HA-GNN\",\n    \"dynamic systems\",\n    \"fading memory\",\n    \"historical information\",\n    \"prediction mechanism\"\n  ],\n  \"required_aspects\": [\n    \"definition of fading memory in dynamic systems\",\n    \"HA-GNN historical information access mechanism\",\n    \"comparison of fading memory and GNN memory models\",\n    \"similarities between dynamical system fading memory and GNN attention\",\n    \"differences in historical information processing between theory and GNNs\"\n  ]\n}",
+    "raw_response_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "cjk_count": 120,
+      "latin_count": 590,
+      "length": 1007
+    },
+    "parsed_json": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质的作用与HA-GNN模型历史访问预测机制的相似性及本质区别分析",
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史访问 预测机制 对比",
+      "retrieval_query_en": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms",
+      "crawler_query_en": "fading memory dynamic systems HA-GNN history attention",
+      "keywords_zh": [
+        "HA-GNN",
+        "动态系统",
+        "衰减记忆",
+        "历史访问信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "HA-GNN",
+        "dynamic systems",
+        "fading memory",
+        "historical information",
+        "prediction mechanism"
+      ],
+      "required_aspects": [
+        "definition of fading memory in dynamic systems",
+        "HA-GNN historical information access mechanism",
+        "comparison of fading memory and GNN memory models",
+        "similarities between dynamical system fading memory and GNN attention",
+        "differences in historical information processing between theory and GNNs"
+      ]
+    },
+    "used_fallback": false,
+    "error_type": "",
+    "error_message": "",
+    "final_plan": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质的作用与HA-GNN模型历史访问预测机制的相似性及本质区别分析",
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史访问 预测机制 对比",
+      "retrieval_query_en": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms",
+      "crawler_query_en": "fading memory dynamic systems HA-GNN history attention",
+      "keywords_zh": [
+        "HA-GNN",
+        "动态系统",
+        "衰减记忆",
+        "历史访问信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "HA-GNN",
+        "dynamic systems",
+        "fading memory",
+        "historical information",
+        "prediction mechanism"
+      ],
+      "required_aspects": [
+        "definition of fading memory in dynamic systems",
+        "HA-GNN historical information access mechanism",
+        "comparison of fading memory and GNN memory models",
+        "similarities between dynamical system fading memory and GNN attention",
+        "differences in historical information processing between theory and GNNs"
+      ]
+    }
+  },
+  "retrieval": {
+    "initialized": true,
+    "initialize_error_type": "",
+    "initialize_error_message": "",
+    "retrieval_queries": {
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史访问 预测机制 对比",
+      "retrieval_query_en": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms",
+      "keywords_en": [
+        "HA-GNN",
+        "dynamic systems",
+        "fading memory",
+        "historical information",
+        "prediction mechanism"
+      ],
+      "bm25_query": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms HA-GNN dynamic systems fading memory historical information prediction mechanism"
+    },
+    "main_retrieval": {
+      "ok": false,
+      "error_type": "TypeError",
+      "error_message": "'VLLMOpenAIEmbeddings' object is not callable",
+      "doc_count": 0,
+      "documents": [],
+      "debug": {}
+    },
+    "branches": {
+      "bm25_en": {
+        "ok": true,
+        "query": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms HA-GNN dynamic systems fading memory historical information prediction mechanism",
+        "doc_count": 15,
+        "documents": [
+          {
+            "content": "Architecture of our HA-GNN model Figure 4. Architecture of our HA-GNN model ## Page 5 2.5 Training and Evaluation We use a random 20% split of our data to pretrain our GCN component. The pretraining is a 3-class classification task where the model predicts the diagnosis of a subject (CN, MCI, or AD) in a given visit. Unlike our main task, during pretraining, the input consists of a single visit instead of the entire visit history of a subject. Fig. 5 shows the architecture of the pretraining model. Figure 5. Architecture of the GCN pretraining model Once pretraining is done, we use 5-fold cross-validation to train and evaluate the model on the main prediction task",
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2604.06469",
+              "pdf_link": "https://arxiv.org/pdf/2604.06469",
+              "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "[24] Y. Huo, T. Chaffey, R. Sepulchre, Kernel modelling of fading memory systems (2024). doi:10.48550/ARXIV.2403.11945. [25] R. Sepulchre, Fading memory [from the editor], IEEE Control Systems 41 (1) (2021) 4–5. doi:10.1109/mcs.2020.3033098.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": ". Additionally, investigating the relationship between visit history length and prediction accuracy could provide insights into the minimum number of data points required for reliable prognostic predictions. Fourth, while our model achieves respectable performance metrics, the lack of built-in interpretability mechanisms limits its clinical utility. Future iterations should incorporate attention mechanisms or other interpretability tools to identify which brain regions and connections are most influential in driving predictions, as demonstrated in Kim et al.(^{19}) Such interpretability would not only increase clinical trust in the model but could also provide neuroscientific insights into the functional network changes that precede cognitive decline",
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2604.06469",
+              "pdf_link": "https://arxiv.org/pdf/2604.06469",
+              "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "W. Sandberg, Z₊ fading memory and extensions of input–output maps, International Journal of Circuit Theory and Applications 29 (4) (2001) 381–388. doi:10.1002/cta.156.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "M. Kang, Memristive devices and systems, Proceedings of the IEEE 64 (2) (1976) 209–223. doi:10.1109/proc.1976.10092. [32] F. Forni, R. Sepulchre, Gradient modelling of memristive systems (2025). arXiv:2504.10093. [33] C. M. Kellett, A compendium of comparison function results, Mathematics of Control, Signals, and Systems 26 (3) (2014) 339–374. doi:10.1007/s00498-014-0128-8. [34] T. I. Donchev, B. M.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "This is, in fact, a usual result for comparison functions, see Lemma 2 of [33]. One can define (\\tilde{w}(x) \\triangleq \\sup_{x \\geq z} w_1(x)) and obtain such (w_2) from (\\tilde{w}) through standard regularization. (\\Box) (\\Delta y(t) \\leq e^{-T/\\tau} \\|\\Delta y(0)\\| + 2 \\text{ess sup}_{\\text{se}[0,1]} e^{-(t-s)/2\\tau} \\|\\Delta u(s)\\|). (7) (\\text{Similar to the properties of δISS systems (see Proposition 4.4 and Proposition 4.5 in [2]), for FM systems, converging inputs lead to converging outputs (CICO), and periodic inputs lead to periodic outputs (PIPO). The first property is, however, more general than that of δISS systems, since it solely relies on the memory kernel and do not require specific state-space properties (such as time-invariant or delay-free dynamics)).",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "W. Sandberg, R₊ fading memory and extensions of input–output maps, IEEE Transactions on Circuits and Systems I: Fundamental Theory and Applications 49 (11) (2002) 1586–1591. doi:10.1109/tcsi.2002.804547.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "## Page 1 State-space fading memory Gustave Bainier(^{a,*}), Antoine Chaillet(^{b}), Rodolphe Sepulchre(^{c,d}), Alessio Franci(^{a,e,*}) (^{a})Dept. of Electrical Engineering and Computer Science, University of Liège, 10 allée de la Découverte, Liège, 4000, Belgium (^{b})Université Paris-Saclay, CNRS, CentraleSupélec, Laboratoire des signaux et systèmes, Gif-sur-Yvette, 91190, France (^{c})KU Leuven, Department of Electrical Engineering (ESAT), STADIUS Center for Dynamical Systems, Signal Processing and Data Analytics, Kasteel Park Arenberg 10, Leuven, 3001, Belgium (^{d})Department of Engineering, University of Cambridge, Trumpington Street, Cambridge, CB2 1PZ, United Kingdom (^{e})WEL Research Institute, Wavre, 1300, Belgium Abstract The fading-memory (FM) property captures the progressive loss of influence of past inputs on a system's current output and has originally been formalized by Boyd and Chua in an operator-theoretic framework. Despite its importance for systems approximation, reservoir computing, and recurrent neural networks, its connection with state-space notions of nonlinear stability, especially incremental ones, remains understudied.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "Model Acc. AUC-ROC BA CN to MCI MCI to AD HA-GNN (LSTM) (0.829 \\pm 0.058) (0.852 \\pm 0.065) (0.771 \\pm 0.114) (0.688) (0.676) HA-GNN (RNN) (0.743 \\pm 0.038) (0.771 \\pm 0.067) (0.651 \\pm 0.114) (0.5) (0.514) HA-GNN (GRU) (0.733 \\pm 0.049) (0.786 \\pm 0.062) (0.704 \\pm 0.071) (0.625) (0.676) w/o pretraining (0.723 \\pm 0.079) (0.642 \\pm 0.095) (0.594 \\pm 0.061) (0.375) (0.405) Due to our novel methodology, comparisons with the existing literature are difficult. However there are a few papers that are close to our task and methods.",
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2604.06469",
+              "pdf_link": "https://arxiv.org/pdf/2604.06469",
+              "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "This paper introduces a state-space definition of FM. In state-space, FM can be interpreted as an extension of incremental input-to-output stability ((\\delta)IOS) that explicitly incorporates a memory kernel upper-bounding the decay of past input differences. It is also closely related to Boyd and Chua's FM definition, with the sole difference of requiring uniform, instead of general, continuity of the memory functional with respect to an input-fading norm. We demonstrate that incremental input-to-state stability ((\\delta)ISS) implies FM semi-globally for time-invariant systems under an equibounded input assumption. Notably, Boyd and Chua's approximation theorems apply to delta-ISS state-space models. As a closing application, we show that, under mild assumptions, the state-space model of current-driven memristors possess the FM property. Keywords: Fading Memory, Incremental Input-to-State Stability, Incremental Input-to-Output Stability 1. Introduction 1.1. Fading memory and the representation of stable systems Fading-Memory (FM), introduced by Stephen P. Boyd and Leon O.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "[23] S. Sugiura, R. Ariizumi, T. Asai, S.-I. Azuma, Nonessentiality of reservoir's fading memory for universality of reservoir computing, IEEE Transactions on Neural Networks and Learning Systems 35 (11) (2024) 16801–16815. doi:10.1109/tnnls.2023.3298013.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": ". Further applications of FM remains to be explored. In the context of interconnected systems [2]: what can be said about the memory kernel of the interconnection of two FM systems under a small-gain condition? In the context of dissipativity theory [40]: could FM help to reduce the conceptual gap between the non-incremental and the (lack of) incremental properties of memristive systems? It would also be useful to develop a state-space characterization of myopia [41], the spatial counterpart of FM, and to investigate how it can be integrated with the proposed state-space notion of FM for the study of partial differential equations",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "N. Tsitsiklis, Worst-case identification of nonlinear fading memory systems, Automatica 31 (3) (1995) 503–508. doi:10.1016/0005-1098(94)00131-2.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": ". However, most Send correspondence to M.M.: moghaddami@oakland.edu ## Page 2 existing GNN methods focus on cross-sectional data and do not fully utilize the longitudinal aspects of disease progression.(^{8}) Longitudinal prediction poses additional challenges, including irregular time intervals between clinical visits, missing imaging data, and varying lengths of visit history across subjects.(^{8}) These factors complicate the modeling of temporal processes and restrict the applicability of standard sequential or graph-based models",
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2604.06469",
+              "pdf_link": "https://arxiv.org/pdf/2604.06469",
+              "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          },
+          {
+            "content": "However, it applies in the operator-theoretic context and does not directly translate to nonlinear state-space systems theory. For linear systems, the situation is simpler: Boyd and Chua have established a convolution theorem, stating that Linear Time-Invariant (LTI) operators have FM if and only if they admit a convolution representation [1]. This makes FM an almost automatic property of LTI systems in engineering practice.",
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "score": null,
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "origin": "local_kb",
+            "aspects": [],
+            "metadata": {
+              "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+              "url": "https://arxiv.org/pdf/2603.23814",
+              "pdf_link": "https://arxiv.org/pdf/2603.23814",
+              "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+              "origin": "local_kb"
+            }
+          }
+        ]
+      },
+      "dense_zh": {
+        "ok": false,
+        "query": "动态系统 衰减记忆 HA-GNN 历史访问 预测机制 对比",
+        "error_type": "TypeError",
+        "error_message": "'VLLMOpenAIEmbeddings' object is not callable",
+        "documents": []
+      },
+      "dense_en": {
+        "ok": false,
+        "query": "comparison of fading memory in dynamic systems and HA-GNN history access prediction mechanisms",
+        "error_type": "TypeError",
+        "error_message": "'VLLMOpenAIEmbeddings' object is not callable",
+        "documents": []
+      }
+    },
+    "fallback_evaluation_input": {
+      "input_source": "branch_fallback",
+      "branch_order": [
+        "bm25_en",
+        "dense_zh",
+        "dense_en"
+      ],
+      "doc_count": 5,
+      "documents": [
+        {
+          "content": "Architecture of our HA-GNN model Figure 4. Architecture of our HA-GNN model ## Page 5 2.5 Training and Evaluation We use a random 20% split of our data to pretrain our GCN component. The pretraining is a 3-class classification task where the model predicts the diagnosis of a subject (CN, MCI, or AD) in a given visit. Unlike our main task, during pretraining, the input consists of a single visit instead of the entire visit history of a subject. Fig. 5 shows the architecture of the pretraining model. Figure 5. Architecture of the GCN pretraining model Once pretraining is done, we use 5-fold cross-validation to train and evaluate the model on the main prediction task",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": null,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "[24] Y. Huo, T. Chaffey, R. Sepulchre, Kernel modelling of fading memory systems (2024). doi:10.48550/ARXIV.2403.11945. [25] R. Sepulchre, Fading memory [from the editor], IEEE Control Systems 41 (1) (2021) 4–5. doi:10.1109/mcs.2020.3033098.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": null,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": ". Additionally, investigating the relationship between visit history length and prediction accuracy could provide insights into the minimum number of data points required for reliable prognostic predictions. Fourth, while our model achieves respectable performance metrics, the lack of built-in interpretability mechanisms limits its clinical utility. Future iterations should incorporate attention mechanisms or other interpretability tools to identify which brain regions and connections are most influential in driving predictions, as demonstrated in Kim et al.(^{19}) Such interpretability would not only increase clinical trust in the model but could also provide neuroscientific insights into the functional network changes that precede cognitive decline",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": null,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "W. Sandberg, Z₊ fading memory and extensions of input–output maps, International Journal of Circuit Theory and Applications 29 (4) (2001) 381–388. doi:10.1002/cta.156.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": null,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "M. Kang, Memristive devices and systems, Proceedings of the IEEE 64 (2) (1976) 209–223. doi:10.1109/proc.1976.10092. [32] F. Forni, R. Sepulchre, Gradient modelling of memristive systems (2025). arXiv:2504.10093. [33] C. M. Kellett, A compendium of comparison function results, Mathematics of Control, Signals, and Systems 26 (3) (2014) 339–374. doi:10.1007/s00498-014-0128-8. [34] T. I. Donchev, B. M.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": null,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        }
+      ]
+    }
+  },
+  "evaluation": {
+    "input_source": "branch_fallback",
+    "input_doc_count": 5,
+    "result": {
+      "sufficient": false,
+      "partial_answerable": true,
+      "aspect_coverage": 0.6,
+      "support_strength": 0.3617,
+      "noise_ratio": 0.4,
+      "covered_aspects": [
+        "definition of fading memory in dynamic systems",
+        "comparison of fading memory and GNN memory models",
+        "similarities between dynamical system fading memory and GNN attention"
+      ],
+      "weak_aspects": [],
+      "missing_aspects": [
+        "HA-GNN historical information access mechanism",
+        "differences in historical information processing between theory and GNNs"
+      ],
+      "aspect_scores": {
+        "definition of fading memory in dynamic systems": 0.5143,
+        "HA-GNN historical information access mechanism": 0.18,
+        "comparison of fading memory and GNN memory models": 0.5143,
+        "similarities between dynamical system fading memory and GNN attention": 0.3,
+        "differences in historical information processing between theory and GNNs": 0.3
+      },
+      "aspect_best_chunks": {
+        "definition of fading memory in dynamic systems": [
+          1,
+          3,
+          0
+        ],
+        "HA-GNN historical information access mechanism": [
+          0
+        ],
+        "comparison of fading memory and GNN memory models": [
+          3,
+          1,
+          4
+        ],
+        "similarities between dynamical system fading memory and GNN attention": [
+          2,
+          3,
+          1
+        ],
+        "differences in historical information processing between theory and GNNs": [
+          2,
+          0,
+          3
+        ]
+      },
+      "next_action": "crawl_more",
+      "top1_coverage": 0.5143,
+      "avg_top3_coverage": 0.4714,
+      "unique_sources": 2,
+      "reason": "aspect_coverage=0.60, support_strength=0.36, noise_ratio=0.40, missing_aspects_count=2, missing_aspects=HA-GNN historical information access mechanism, differences in historical information processing between theory and GNNs, next_action=crawl_more",
+      "scored_docs": [
+        {
+          "content": "Architecture of our HA-GNN model Figure 4. Architecture of our HA-GNN model ## Page 5 2.5 Training and Evaluation We use a random 20% split of our data to pretrain our GCN component. The pretraining is a 3-class classification task where the model predicts the diagnosis of a subject (CN, MCI, or AD) in a given visit. Unlike our main task, during pretraining, the input consists of a single visit instead of the entire visit history of a subject. Fig. 5 shows the architecture of the pretraining model. Figure 5. Architecture of the GCN pretraining model Once pretraining is done, we use 5-fold cross-validation to train and evaluate the model on the main prediction task",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.2571,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "[24] Y. Huo, T. Chaffey, R. Sepulchre, Kernel modelling of fading memory systems (2024). doi:10.48550/ARXIV.2403.11945. [25] R. Sepulchre, Fading memory [from the editor], IEEE Control Systems 41 (1) (2021) 4–5. doi:10.1109/mcs.2020.3033098.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.5143,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": ". Additionally, investigating the relationship between visit history length and prediction accuracy could provide insights into the minimum number of data points required for reliable prognostic predictions. Fourth, while our model achieves respectable performance metrics, the lack of built-in interpretability mechanisms limits its clinical utility. Future iterations should incorporate attention mechanisms or other interpretability tools to identify which brain regions and connections are most influential in driving predictions, as demonstrated in Kim et al.(^{19}) Such interpretability would not only increase clinical trust in the model but could also provide neuroscientific insights into the functional network changes that precede cognitive decline",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.3,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "W. Sandberg, Z₊ fading memory and extensions of input–output maps, International Journal of Circuit Theory and Applications 29 (4) (2001) 381–388. doi:10.1002/cta.156.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.5143,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        },
+        {
+          "content": "M. Kang, Memristive devices and systems, Proceedings of the IEEE 64 (2) (1976) 209–223. doi:10.1109/proc.1976.10092. [32] F. Forni, R. Sepulchre, Gradient modelling of memristive systems (2025). arXiv:2504.10093. [33] C. M. Kellett, A compendium of comparison function results, Mathematics of Control, Signals, and Systems 26 (3) (2014) 339–374. doi:10.1007/s00498-014-0128-8. [34] T. I. Donchev, B. M.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.3857,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "diagnostic_branch": "bm25_en"
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "output_dir": "C:\\Users\\jack\\Desktop\\demo\\paper_results",
+    "output_prefix": "fading_memory_ha_gnn_diag_20260410",
+    "step1_optimizer_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_step1_optimizer.md",
+    "step2_retrieval_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_step2_retrieval.md",
+    "step3_evaluation_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_step3_evaluation.md",
+    "trace_json": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_trace.json"
+  }
+}

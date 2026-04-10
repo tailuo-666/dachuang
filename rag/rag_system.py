@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import os
 import re
 from collections import defaultdict
@@ -11,6 +12,7 @@ import requests
 from langchain_community.document_loaders import TextLoader
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_community.retrievers import BM25Retriever
+from langchain_core.embeddings import Embeddings
 from langchain_experimental.text_splitter import SemanticChunker
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -39,9 +41,11 @@ RRF_TOP_K = 20
 FINAL_TOP_K = 5
 RRF_K = 60
 MIN_INDEX_CHARS = 20
+SEMANTIC_PRECHUNK_SIZE = 6000
+SEMANTIC_PRECHUNK_OVERLAP = 600
 
 
-class VLLMOpenAIEmbeddings:
+class VLLMOpenAIEmbeddings(Embeddings):
     """Minimal OpenAI-compatible embeddings client for local vLLM services."""
 
     def __init__(self, *, base_url: str, model: str, api_key: str = "EMPTY", timeout: float = 60.0):
@@ -85,6 +89,10 @@ class VLLMOpenAIEmbeddings:
 
     def embed_query(self, text: str) -> list[float]:
         return self._post_embeddings([str(text or "")])[0]
+
+    def __call__(self, text: str) -> list[float]:
+        """Backward-compatible callable path for vector stores expecting a function."""
+        return self.embed_query(text)
 
 
 class RAGSystem:
@@ -213,7 +221,7 @@ class RAGSystem:
             print(f"Markdown directory does not exist: {MD_OUTPUT_FOLDER}")
             return []
 
-        md_files = glob.glob(os.path.join(MD_OUTPUT_FOLDER, "*.md"))
+        md_files = sorted(glob.glob(os.path.join(MD_OUTPUT_FOLDER, "*.md")))
         if not md_files:
             print(f"No markdown files found in {MD_OUTPUT_FOLDER}")
             return []
@@ -223,14 +231,56 @@ class RAGSystem:
             try:
                 loader = TextLoader(md_file, encoding="utf-8")
                 loaded = loader.load()
+                sidecar_metadata = self._load_md_sidecar_metadata(md_file)
+                md_filename = os.path.basename(md_file)
+                fallback_title = str(
+                    sidecar_metadata.get("title") or os.path.splitext(md_filename)[0]
+                ).strip()
+                fallback_url = str(
+                    sidecar_metadata.get("url") or sidecar_metadata.get("pdf_link") or ""
+                ).strip()
+                fallback_pdf_link = str(
+                    sidecar_metadata.get("pdf_link") or fallback_url
+                ).strip()
+                source_file = str(
+                    sidecar_metadata.get("source_file") or md_filename
+                ).strip() or md_filename
                 for doc in loaded:
-                    doc.metadata["source"] = os.path.basename(md_file)
+                    metadata = dict(doc.metadata or {})
+                    metadata.update(sidecar_metadata)
+                    metadata["title"] = fallback_title
+                    metadata["url"] = fallback_url
+                    metadata["pdf_link"] = fallback_pdf_link
+                    metadata["source_file"] = source_file
+                    metadata["origin"] = str(
+                        sidecar_metadata.get("origin") or metadata.get("origin") or "local_kb"
+                    ).strip() or "local_kb"
+                    metadata["source"] = fallback_title or md_filename
+                    doc.metadata = metadata
                 documents.extend(loaded)
                 print(f"Loaded {os.path.basename(md_file)}")
             except Exception as exc:
                 print(f"Failed to load {md_file}: {exc}")
 
         return documents
+
+    def _metadata_sidecar_path(self, path: str) -> str:
+        stem, _ = os.path.splitext(path)
+        return f"{stem}.metadata.json"
+
+    def _load_md_sidecar_metadata(self, md_file: str) -> dict[str, Any]:
+        sidecar_path = self._metadata_sidecar_path(md_file)
+        if not os.path.exists(sidecar_path):
+            return {}
+        try:
+            with open(sidecar_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except Exception as exc:
+            print(f"Failed to load metadata sidecar {sidecar_path}: {exc}")
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key): value for key, value in payload.items()}
 
     def retriever_vector_store(self):
         """Load the existing FAISS index if it exists."""
@@ -283,6 +333,16 @@ class RAGSystem:
             doc.page_content = content
             processed_docs.append(doc)
         return processed_docs
+
+    def _prepare_semantic_chunk_inputs(self, documents, cleaner):
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=SEMANTIC_PRECHUNK_SIZE,
+            chunk_overlap=SEMANTIC_PRECHUNK_OVERLAP,
+            length_function=len,
+            separators=["\n\n", "\n", ". ", "? ", "! ", "; ", ", ", " "],
+        )
+        prechunked_docs = splitter.split_documents(documents)
+        return self._collect_indexable_docs(prechunked_docs, cleaner)
 
     def setup_vector_store_optimized_fallback(self, documents):
         """Fallback chunking strategy for rebuilding the FAISS index."""
@@ -358,12 +418,18 @@ class RAGSystem:
         min_chars = self._min_index_chars()
 
         try:
+            semantic_input_docs = self._prepare_semantic_chunk_inputs(documents, clean_arxiv_content)
+            print(f"Semantic pre-chunking prepared {len(semantic_input_docs)} docs.")
+            if not semantic_input_docs:
+                print("No semantic pre-chunks were produced from ./md. Expand the markdown content and retry.")
+                return None
+
             text_splitter = SemanticChunker(
                 self.embeddings,
                 breakpoint_threshold_type="percentile",
                 breakpoint_threshold_amount=85,
             )
-            texts = text_splitter.split_documents(documents)
+            texts = text_splitter.split_documents(semantic_input_docs)
 
             processed_texts = []
             for text in texts:
@@ -418,16 +484,26 @@ class RAGSystem:
 
     def _normalize_langchain_doc(self, doc) -> NormalizedDocument:
         metadata = self._safe_metadata(getattr(doc, "metadata", {}) or {})
+        title = str(metadata.get("title") or metadata.get("source") or "").strip()
+        url = str(metadata.get("url") or metadata.get("pdf_link") or "").strip()
+        origin = str(metadata.get("origin") or "local_kb").strip() or "local_kb"
         source = (
             str(metadata.get("source", "")).strip()
-            or str(metadata.get("title", "")).strip()
+            or title
+            or url
             or "unknown"
         )
+        metadata["title"] = title or source
+        metadata["url"] = url
+        metadata["origin"] = origin
         content = str(getattr(doc, "page_content", "")).strip()
         return NormalizedDocument(
             content=content,
             source=source,
             score=None,
+            title=title or source,
+            url=url,
+            origin=origin,
             metadata=metadata,
         )
 

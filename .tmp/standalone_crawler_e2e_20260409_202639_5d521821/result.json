@@ -1,0 +1,249 @@
+{
+  "status": "success",
+  "run_id": "20260409_202639_5d521821",
+  "elapsed_seconds": 108.65839982032776,
+  "aspects": [
+    "the definition of RNN",
+    "the definition of CNN"
+  ],
+  "artifacts_dir": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\standalone_crawler_e2e_20260409_202639_5d521821",
+  "paper_dir": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\standalone_crawler_e2e_20260409_202639_5d521821\\paper_results",
+  "md_dir": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\standalone_crawler_e2e_20260409_202639_5d521821\\md",
+  "payload": {
+    "kind": "crawl_result",
+    "status": "success",
+    "message": "arXiv found 2 papers, returned 4 summary chunks, covered 2/2 missing_aspects.",
+    "requested_missing_aspects": [
+      "the definition of RNN",
+      "the definition of CNN"
+    ],
+    "covered_missing_aspects": [
+      "the definition of RNN",
+      "the definition of CNN"
+    ],
+    "uncovered_missing_aspects": [],
+    "search_queries": [
+      {
+        "aspect": "the definition of RNN",
+        "query": "\"the definition of RNN\""
+      },
+      {
+        "aspect": "the definition of CNN",
+        "query": "\"the definition of CNN\""
+      }
+    ],
+    "aspect_evidence": [
+      {
+        "aspect": "the definition of RNN",
+        "coverage_status": "covered",
+        "chunk": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias",
+        "score": 0.675,
+        "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+        "paper_source": "https://arxiv.org/pdf/2304.09880",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "authors": [
+          "Luisa Lucie-Smith",
+          "Alexandre Barreira",
+          "Fabian Schmidt"
+        ],
+        "submission_date": "19 April, 2023"
+      },
+      {
+        "aspect": "the definition of CNN",
+        "coverage_status": "covered",
+        "chunk": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias",
+        "score": 0.9,
+        "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+        "paper_source": "https://arxiv.org/pdf/2304.09880",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "authors": [
+          "Luisa Lucie-Smith",
+          "Alexandre Barreira",
+          "Fabian Schmidt"
+        ],
+        "submission_date": "19 April, 2023"
+      },
+      {
+        "aspect": "the definition of RNN",
+        "coverage_status": "covered",
+        "chunk": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: elength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and",
+        "score": 0.675,
+        "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+        "paper_source": "https://arxiv.org/pdf/2304.09880",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "authors": [
+          "Luisa Lucie-Smith",
+          "Alexandre Barreira",
+          "Fabian Schmidt"
+        ],
+        "submission_date": "19 April, 2023"
+      },
+      {
+        "aspect": "the definition of CNN",
+        "coverage_status": "covered",
+        "chunk": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: elength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and",
+        "score": 0.9,
+        "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+        "paper_source": "https://arxiv.org/pdf/2304.09880",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "authors": [
+          "Luisa Lucie-Smith",
+          "Alexandre Barreira",
+          "Fabian Schmidt"
+        ],
+        "submission_date": "19 April, 2023"
+      }
+    ],
+    "evidence_docs": [
+      {
+        "content": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias",
+        "source": "arXiv:2304.09880 [ pdf , other ]",
+        "score": 0.9,
+        "title": "",
+        "url": "",
+        "origin": "",
+        "aspects": [],
+        "metadata": {
+          "title": "arXiv:2304.09880 [ pdf , other ]",
+          "abstract": "We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and $b_2$, as well as for the local primordial non-Gaussianity linear bias parameter $b_φ$. The expected secondary assembly bias dependence on halo concentration is also recovered by the CNN: at fixed mass, halo concentration has only a mild impact on $b_1$, but a strong impact on $b_φ$. Our framework opens a new window for discovering which physical aspects of the halo's Lagrangian patch determine assembly bias, which in turn can inform physical models of halo formation and bias. △ Less",
+          "submission_date": "19 April, 2023",
+          "pdf_link": "https://arxiv.org/pdf/2304.09880",
+          "authors": [
+            "Luisa Lucie-Smith",
+            "Alexandre Barreira",
+            "Fabian Schmidt"
+          ],
+          "source": "arxiv",
+          "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+          "paper_source": "https://arxiv.org/pdf/2304.09880",
+          "chunk_index": 1,
+          "chunk_count": 4,
+          "matched_aspects": [
+            "the definition of CNN",
+            "the definition of RNN"
+          ]
+        }
+      },
+      {
+        "content": "Title: arXiv:2304.09880 [ pdf , other ]\nAuthors: Luisa Lucie-Smith, Alexandre Barreira, Fabian Schmidt\nSubmitted: 19 April, 2023\nPDF: https://arxiv.org/pdf/2304.09880\nAbstract: elength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and",
+        "source": "arXiv:2304.09880 [ pdf , other ]",
+        "score": 0.9,
+        "title": "",
+        "url": "",
+        "origin": "",
+        "aspects": [],
+        "metadata": {
+          "title": "arXiv:2304.09880 [ pdf , other ]",
+          "abstract": "We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and $b_2$, as well as for the local primordial non-Gaussianity linear bias parameter $b_φ$. The expected secondary assembly bias dependence on halo concentration is also recovered by the CNN: at fixed mass, halo concentration has only a mild impact on $b_1$, but a strong impact on $b_φ$. Our framework opens a new window for discovering which physical aspects of the halo's Lagrangian patch determine assembly bias, which in turn can inform physical models of halo formation and bias. △ Less",
+          "submission_date": "19 April, 2023",
+          "pdf_link": "https://arxiv.org/pdf/2304.09880",
+          "authors": [
+            "Luisa Lucie-Smith",
+            "Alexandre Barreira",
+            "Fabian Schmidt"
+          ],
+          "source": "arxiv",
+          "paper_title": "arXiv:2304.09880 [ pdf , other ]",
+          "paper_source": "https://arxiv.org/pdf/2304.09880",
+          "chunk_index": 2,
+          "chunk_count": 4,
+          "matched_aspects": [
+            "the definition of CNN",
+            "the definition of RNN"
+          ]
+        }
+      }
+    ],
+    "selected_papers": [
+      {
+        "title": "arXiv:2304.09880 [ pdf , other ]",
+        "abstract": "We build a deep learning framework that connects the local formation process of dark matter halos to the halo bias. We train a convolutional neural network (CNN) to predict the final mass and concentration of dark matter halos from the initial conditions. The CNN is then used as a surrogate model to derive the response of the halos' mass and concentration to long-wavelength perturbations in the initial conditions, and consequently the halo bias parameters following the \"response bias\" definition . The CNN correctly predicts how the local properties of dark matter halos respond to changes in the large-scale environment, despite no explicit knowledge of halo bias being provided during training. We show that the CNN recovers the known trends for the linear and second-order density bias parameters $b_1$ and $b_2$, as well as for the local primordial non-Gaussianity linear bias parameter $b_φ$. The expected secondary assembly bias dependence on halo concentration is also recovered by the CNN: at fixed mass, halo concentration has only a mild impact on $b_1$, but a strong impact on $b_φ$. Our framework opens a new window for discovering which physical aspects of the halo's Lagrangian patch determine assembly bias, which in turn can inform physical models of halo formation and bias. △ Less",
+        "submission_date": "19 April, 2023",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "authors": [
+          "Luisa Lucie-Smith",
+          "Alexandre Barreira",
+          "Fabian Schmidt"
+        ],
+        "matched_aspects": [
+          "the definition of CNN",
+          "the definition of RNN"
+        ]
+      }
+    ],
+    "ingestion_status": "pending",
+    "pending_ingest_paper_count": 1
+  },
+  "ingestion_result": {
+    "status": "success",
+    "message": "Selected 1 new papers, downloaded 1, OCR-processed 1, rebuild_success=True.",
+    "candidate_paper_count": 1,
+    "selected_new_paper_count": 1,
+    "download_success_count": 1,
+    "ocr_success_count": 1,
+    "md_written_count": 1,
+    "skipped_duplicate_count": 0,
+    "skipped_duplicates": [],
+    "downloaded_files": [
+      "C:\\Users\\jack\\Desktop\\demo\\.tmp\\standalone_crawler_e2e_20260409_202639_5d521821\\paper_results\\arXiv2304.09880 [ pdf , other ].pdf"
+    ],
+    "written_md_files": [
+      "C:\\Users\\jack\\Desktop\\demo\\.tmp\\standalone_crawler_e2e_20260409_202639_5d521821\\md\\arXiv2304.09880 [ pdf , other ].md"
+    ],
+    "failed_papers": [],
+    "rebuild_success": true
+  },
+  "rewrites": [
+    {
+      "original_aspect": "the definition of RNN",
+      "optimized_query_en": "the definition of RNN",
+      "keywords_en": [
+        "the definition of RNN"
+      ]
+    },
+    {
+      "original_aspect": "the definition of CNN",
+      "optimized_query_en": "the definition of CNN",
+      "keywords_en": [
+        "the definition of CNN"
+      ]
+    }
+  ],
+  "service_info": {
+    "embedding_class": "VLLMOpenAIEmbeddings",
+    "vectorstore_loaded": true,
+    "vectorstore_error": null,
+    "chunk_count": 139,
+    "uses_remote_embedding": true
+  },
+  "faiss_snapshot": {
+    "exists": true,
+    "files": [
+      "index.faiss",
+      "index.pkl"
+    ],
+    "mtimes": {
+      "index.faiss": 1775737710.8893702,
+      "index.pkl": 1775737710.89028
+    }
+  },
+  "md_files": [
+    {
+      "name": "arXiv2304.09880 [ pdf , other ].md",
+      "size": 77000,
+      "preview": "## Page 1\n\nPreprint 21 April 2023\n\nCompiled using MNRAS L&HEX style file v3.0\n\nHalo assembly bias from a deep learning model of halo formation\n\nLuisa Lucie-Smith(^{1*}), Alexandre Barreira(^{2,3}) and Fabian Schmidt(^{1}) (^{1})Max-Planck-Institut für Astrophysik, Karl-Schwarzchild-Str. 1, 85748 Garching, Germany (^{2})Excellence Cluster ORIGINS, Boltzmannstraße 2, 85748 Garching, Germany (^{3})Ludwig-Maximilians-Universität, Schellingstraße 4, 80799 München, Germany\n\nAccepted XXX. Received YYY;"
+    }
+  ],
+  "md_metadata_files": [
+    {
+      "name": "arXiv2304.09880 [ pdf , other ].metadata.json",
+      "content": {
+        "title": "arXiv:2304.09880 [ pdf , other ]",
+        "url": "https://arxiv.org/pdf/2304.09880",
+        "pdf_link": "https://arxiv.org/pdf/2304.09880",
+        "source_file": "arXiv2304.09880 [ pdf , other ].pdf",
+        "origin": "local_kb"
+      }
+    }
+  ]
+}

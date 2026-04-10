@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import glob
+import json
 import math
 import os
 import re
@@ -97,6 +99,37 @@ class ArxivCrawlerIntegrated:
         title = self._sanitize_phrase(str(paper.get("title", ""))).lower()
         submission = self._sanitize_phrase(str(paper.get("submission_date", ""))).lower()
         return pdf_link or f"{title}::{submission}"
+
+    def _metadata_sidecar_path(self, filepath: str) -> str:
+        stem, _ = os.path.splitext(filepath)
+        return f"{stem}.metadata.json"
+
+    def _build_download_metadata(self, paper: dict[str, Any], filepath: str) -> dict[str, Any]:
+        title = self._sanitize_phrase(str(paper.get("title", ""))).strip()
+        pdf_link = self._sanitize_phrase(
+            str(paper.get("pdf_link") or paper.get("paper_link") or "").strip()
+        )
+        return {
+            "title": title,
+            "url": pdf_link,
+            "pdf_link": pdf_link,
+            "source_file": os.path.basename(filepath),
+            "origin": "local_kb",
+        }
+
+    def _write_metadata_sidecar(self, filepath: str, paper: dict[str, Any]) -> bool:
+        try:
+            with open(self._metadata_sidecar_path(filepath), "w", encoding="utf-8") as file:
+                json.dump(
+                    self._build_download_metadata(paper, filepath),
+                    file,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            return True
+        except Exception as exc:
+            print(f"Failed to write metadata sidecar for {os.path.basename(filepath)}: {exc}")
+            return False
 
     def _resolve_aspect_query_text(self, aspect: str, query_plan: AcademicQueryPlan | None) -> str:
         cleaned_aspect = self._sanitize_phrase(aspect)
@@ -559,6 +592,236 @@ class ArxivCrawlerIntegrated:
         shortlist = [paper for paper in papers if self._paper_key(paper) in selected_keys]
         return shortlist[:max_downloads] if shortlist else papers[:max_downloads]
 
+    def _ingest_identity_key(self, paper: dict[str, Any] | None) -> str:
+        item = paper or {}
+        pdf_link = self._sanitize_phrase(str(item.get("pdf_link") or item.get("paper_link") or "")).lower()
+        if pdf_link:
+            return pdf_link
+        return self._sanitize_phrase(str(item.get("title", ""))).lower()
+
+    def _load_sidecar_payload(self, sidecar_path: str) -> dict[str, Any]:
+        try:
+            with open(sidecar_path, "r", encoding="utf-8") as file:
+                payload = json.load(file)
+        except Exception:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _load_existing_ingest_keys(self, md_output_dir: str) -> set[str]:
+        existing_keys: set[str] = set()
+        metadata_paths = glob.glob(os.path.join(self.output_dir, "*.metadata.json"))
+        metadata_paths += glob.glob(os.path.join(md_output_dir, "*.metadata.json"))
+        for sidecar_path in metadata_paths:
+            payload = self._load_sidecar_payload(sidecar_path)
+            key = self._ingest_identity_key(payload)
+            if key:
+                existing_keys.add(key)
+        return existing_keys
+
+    def _select_new_ingest_papers(
+        self,
+        ingest_papers: list[dict[str, Any]],
+        *,
+        md_output_dir: str,
+        max_new_papers: int,
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+        existing_keys = self._load_existing_ingest_keys(md_output_dir)
+        selected: list[dict[str, Any]] = []
+        skipped_duplicates: list[dict[str, Any]] = []
+        seen_in_batch: set[str] = set()
+
+        for paper in ingest_papers:
+            key = self._ingest_identity_key(paper)
+            if key and (key in existing_keys or key in seen_in_batch):
+                skipped_duplicates.append(dict(paper))
+                continue
+            selected.append(dict(paper))
+            if key:
+                seen_in_batch.add(key)
+            if len(selected) >= max_new_papers:
+                break
+
+        return selected, skipped_duplicates
+
+    def _save_ingestion_manifests(self, ingestion_job: dict[str, Any]) -> None:
+        all_papers = [dict(paper) for paper in ingestion_job.get("all_papers") or []]
+        if not all_papers:
+            return
+
+        manifest_csv = str(ingestion_job.get("manifest_csv") or "paper_result.csv").strip() or "paper_result.csv"
+        manifest_txt = (
+            str(ingestion_job.get("manifest_txt") or "formatted_papers.txt").strip()
+            or "formatted_papers.txt"
+        )
+        self.save_to_csv(papers=all_papers, filename=manifest_csv)
+        formatted = [self.format_paper(paper) for paper in all_papers]
+        self.save_formatted_papers(papers=formatted, filename=manifest_txt)
+
+    def execute_ingestion_job(
+        self,
+        ingestion_job: dict[str, Any] | None,
+        *,
+        md_output_dir: str = "./md",
+        max_new_papers: int = 5,
+        pdf_processor=None,
+        rag_system=None,
+        chunk_strategy: str = "semantic_arxiv",
+    ) -> dict[str, Any]:
+        if not ingestion_job:
+            return {
+                "status": "skipped",
+                "message": "No ingestion job provided.",
+                "candidate_paper_count": 0,
+                "selected_new_paper_count": 0,
+                "download_success_count": 0,
+                "ocr_success_count": 0,
+                "md_written_count": 0,
+                "skipped_duplicate_count": 0,
+                "failed_papers": [],
+                "rebuild_success": False,
+            }
+
+        self._save_ingestion_manifests(ingestion_job)
+
+        ingest_papers = [dict(paper) for paper in ingestion_job.get("ingest_papers") or []]
+        if not ingest_papers:
+            ingest_papers = [dict(paper) for paper in ingestion_job.get("selected_papers") or []]
+        if not ingest_papers:
+            ingest_papers = [dict(paper) for paper in ingestion_job.get("all_papers") or []]
+
+        selected_new_papers, skipped_duplicates = self._select_new_ingest_papers(
+            ingest_papers,
+            md_output_dir=md_output_dir,
+            max_new_papers=max_new_papers,
+        )
+        if not selected_new_papers:
+            return {
+                "status": "skipped",
+                "message": "No new papers selected for ingestion after deduplication.",
+                "candidate_paper_count": len(ingest_papers),
+                "selected_new_paper_count": 0,
+                "download_success_count": 0,
+                "ocr_success_count": 0,
+                "md_written_count": 0,
+                "skipped_duplicate_count": len(skipped_duplicates),
+                "skipped_duplicates": skipped_duplicates,
+                "failed_papers": [],
+                "rebuild_success": False,
+            }
+
+        if pdf_processor is None:
+            try:
+                from ..pdf_processor import PDFProcessor
+            except ImportError:
+                from pdf_processor import PDFProcessor
+
+            pdf_processor = PDFProcessor(output_dir=md_output_dir, lang="en", dpi=220)
+
+        downloaded_files: list[str] = []
+        failed_papers: list[dict[str, Any]] = []
+        for index, paper in enumerate(selected_new_papers, start=1):
+            paper_link = paper.get("pdf_link") or paper.get("paper_link")
+            if not paper_link:
+                failed_papers.append(
+                    {
+                        "title": paper.get("title", ""),
+                        "reason": "missing_pdf_link",
+                    }
+                )
+                continue
+
+            clean_title = self._clean_filename(str(paper.get("title", f"paper_{index}")))
+            filepath = os.path.join(self.output_dir, f"{clean_title}.pdf")
+            if os.path.exists(filepath):
+                self._write_metadata_sidecar(filepath, paper)
+                downloaded_files.append(filepath)
+                continue
+
+            print(f"[{index}/{len(selected_new_papers)}] Downloading: {paper.get('title', '')}")
+            if self.download_paper(str(paper_link), filepath):
+                self._write_metadata_sidecar(filepath, paper)
+                downloaded_files.append(filepath)
+            else:
+                failed_papers.append(
+                    {
+                        "title": paper.get("title", ""),
+                        "pdf_link": paper_link,
+                        "reason": "download_failed",
+                    }
+                )
+            time.sleep(1)
+
+        md_written_files: list[str] = []
+        for pdf_path in downloaded_files:
+            try:
+                result = pdf_processor.process_pdf(pdf_path)
+                md_written_files.append(str(result.get("md_path") or ""))
+            except Exception as exc:
+                failed_papers.append(
+                    {
+                        "title": os.path.splitext(os.path.basename(pdf_path))[0],
+                        "pdf_path": pdf_path,
+                        "reason": f"ocr_failed: {exc}",
+                    }
+                )
+
+        rebuild_success = False
+        if md_written_files:
+            try:
+                try:
+                    import rag.rag_system as rag_system_module
+                    from rag.rag_system import RAGSystem
+                except ImportError:
+                    import rag_system as rag_system_module
+                    from rag_system import RAGSystem
+
+                rebuild_instance = rag_system or RAGSystem()
+                if getattr(rebuild_instance, "embeddings", None) is None:
+                    rebuild_instance.setup_embeddings()
+
+                original_md_folder = rag_system_module.MD_OUTPUT_FOLDER
+                rag_system_module.MD_OUTPUT_FOLDER = md_output_dir
+                try:
+                    rebuild_success = bool(rebuild_instance.update_rag_system(chunk_strategy=chunk_strategy))
+                finally:
+                    rag_system_module.MD_OUTPUT_FOLDER = original_md_folder
+            except Exception as exc:
+                failed_papers.append({"title": "", "reason": f"faiss_rebuild_failed: {exc}"})
+
+        if md_written_files and rebuild_success and not failed_papers:
+            status = "success"
+        elif md_written_files:
+            status = "partial_success"
+        else:
+            status = "failed"
+
+        message = (
+            f"Selected {len(selected_new_papers)} new papers, "
+            f"downloaded {len(downloaded_files)}, "
+            f"OCR-processed {len(md_written_files)}, "
+            f"rebuild_success={rebuild_success}."
+        )
+        if skipped_duplicates:
+            message = f"{message} Skipped duplicates: {len(skipped_duplicates)}."
+        if failed_papers:
+            message = f"{message} Failures: {len(failed_papers)}."
+
+        return {
+            "status": status,
+            "message": message,
+            "candidate_paper_count": len(ingest_papers),
+            "selected_new_paper_count": len(selected_new_papers),
+            "download_success_count": len(downloaded_files),
+            "ocr_success_count": len(md_written_files),
+            "md_written_count": len(md_written_files),
+            "skipped_duplicate_count": len(skipped_duplicates),
+            "skipped_duplicates": skipped_duplicates,
+            "downloaded_files": downloaded_files,
+            "written_md_files": [path for path in md_written_files if path],
+            "failed_papers": failed_papers,
+            "rebuild_success": rebuild_success,
+        }
+
     def crawl_and_collect(
         self,
         *,
@@ -621,7 +884,11 @@ class ArxivCrawlerIntegrated:
                 max_total=max_total_evidence,
             )
         )
-        ingest_shortlist = self._build_ingest_shortlist(papers_raw, selected_papers, max_downloads=3)
+        ingest_shortlist = self._build_ingest_shortlist(
+            papers_raw,
+            selected_papers,
+            max_downloads=max(5, max_total_evidence),
+        )
 
         if not papers_raw:
             status = "empty"
@@ -802,12 +1069,14 @@ class ArxivCrawlerIntegrated:
             clean_title = self._clean_filename(str(paper.get("title", f"paper_{index}")))
             filepath = os.path.join(self.output_dir, f"{clean_title}.pdf")
             if os.path.exists(filepath):
+                self._write_metadata_sidecar(filepath, paper)
                 print(f"File already exists, skipping: {os.path.basename(filepath)}")
                 success_count += 1
                 continue
 
             print(f"[{index}/{len(papers)}] Downloading: {paper.get('title', '')}")
             if self.download_paper(str(paper_link), filepath):
+                self._write_metadata_sidecar(filepath, paper)
                 print(f"Downloaded: {os.path.basename(filepath)}")
                 success_count += 1
             else:

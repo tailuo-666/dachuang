@@ -1,0 +1,559 @@
+{
+  "query_source": {
+    "source": "query_file",
+    "path": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\fading_memory_ha_gnn_query_utf8.txt"
+  },
+  "query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "default_query_reference": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "runtime": {
+    "cwd": "C:\\Users\\jack\\Desktop\\demo",
+    "repo_root": "C:\\Users\\jack\\Desktop\\demo",
+    "timestamp": "2026-04-10T09:46:14.981391",
+    "llm": {
+      "scheme": "http",
+      "host": "127.0.0.1",
+      "port": 8001,
+      "model": "Qwen/Qwen3.5-9B",
+      "api_key": "EMPTY",
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8001,
+        "local_host": "127.0.0.1",
+        "local_port": 18001
+      },
+      "base_url": "http://127.0.0.1:18001/v1"
+    },
+    "embedding": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8000,
+        "local_host": "127.0.0.1",
+        "local_port": 18000
+      },
+      "base_url": "http://127.0.0.1:18000/v1",
+      "model": "bge-m3"
+    },
+    "ocr": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8002,
+        "local_host": "127.0.0.1",
+        "local_port": 18002
+      },
+      "base_url": "http://127.0.0.1:18002/v1",
+      "model": ""
+    }
+  },
+  "optimizer": {
+    "input_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "input_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "mojibake_marker_count": 0,
+      "cjk_count": 48,
+      "latin_count": 17,
+      "length": 73
+    },
+    "planner_input_question": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "prompt_human_message_excerpt": "Return strict JSON with exactly these fields:\n{\n  \"original_query\": \"...\",\n  \"normalized_query_zh\": \"...\",\n  \"retrieval_query_zh\": \"...\",\n  \"retrieval_query_en\": \"...\",\n  \"crawler_query_en\": \"...\",\n  \"keywords_zh\": [\"...\"],\n  \"keywords_en\": [\"...\"],\n  \"required_aspects\": [\"...\"]\n}\n\nRules:\n1. `normalized_query_zh` should be a polished Chinese version of the original intent.\n2. `retrieval_query_zh` is for local Chinese retrieval and should stay concise and natural.\n3. `retrieval_query_en` is for semantic retrieval and must preserve the original meaning instead of literal word-by-word translation.\n4. `crawler_query_en` is only a short fallback academic search string for title/abstract search.\n5. `keywords_zh` and `keywords_en` must be deduplicated and ordered by importance.\n6. `required_aspects` is the most important field. It must be English search-ready noun phrases, not sentences, and at most 5 items.\n7. Every required aspect must be independently searchable and independently judgeable later.\n8. Prefer aspects framed as definition, mechanism, difference, reason, method, limitation, or evidence.\n9. For comparison questions such as \"why A is better than B\", prefer:\n   - definition of A\n   - definition of B\n   - differences between A and B\n   - advantages of A over B\n10. Preserve standard English academic terms and abbreviations such as RAG, LLM, BM25, OCR, and arXiv.\n11. Avoid invented translations. Keep standard English terms when they are known.\n12. `keywords_en` should prefer academic phrases such as \"query rewriting\", \"information retrieval\", and \"question answering\".\n13....(truncated)",
+    "raw_response": "\n\n{\n  \"original_query\": \"fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？\",\n  \"normalized_query_zh\": \"动态系统中衰减记忆性质与 HA-GNN 模型历史访问预测机制的相似性和本质区别分析\",\n  \"retrieval_query_zh\": \"衰减记忆 动态系统 HA-GNN 历史访问信息 预测机制 比较\",\n  \"retrieval_query_en\": \"comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism\",\n  \"crawler_query_en\": \"fading memory dynamical systems HA-GNN historical access prediction\",\n  \"keywords_zh\": [\n    \"衰减记忆\",\n    \"HA-GNN\",\n    \"动态系统\",\n    \"历史访问信息\",\n    \"预测机制\"\n  ],\n  \"keywords_en\": [\n    \"fading memory\",\n    \"HA-GNN\",\n    \"dynamical systems\",\n    \"historical access\",\n    \"prediction mechanism\"\n  ],\n  \"required_aspects\": [\n    \"definition of fading memory in dynamical systems\",\n    \"function of fading memory in dynamical systems\",\n    \"mechanism of historical access usage in HA-GNN\",\n    \"similarities between fading memory and HA-GNN memory\",\n    \"differences between fading memory and HA-GNN prediction framework\"\n  ]\n}",
+    "raw_response_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "mojibake_marker_count": 0,
+      "cjk_count": 119,
+      "latin_count": 581,
+      "length": 1000
+    },
+    "parsed_json": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质与 HA-GNN 模型历史访问预测机制的相似性和本质区别分析",
+      "retrieval_query_zh": "衰减记忆 动态系统 HA-GNN 历史访问信息 预测机制 比较",
+      "retrieval_query_en": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism",
+      "crawler_query_en": "fading memory dynamical systems HA-GNN historical access prediction",
+      "keywords_zh": [
+        "衰减记忆",
+        "HA-GNN",
+        "动态系统",
+        "历史访问信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "fading memory",
+        "HA-GNN",
+        "dynamical systems",
+        "historical access",
+        "prediction mechanism"
+      ],
+      "required_aspects": [
+        "definition of fading memory in dynamical systems",
+        "function of fading memory in dynamical systems",
+        "mechanism of historical access usage in HA-GNN",
+        "similarities between fading memory and HA-GNN memory",
+        "differences between fading memory and HA-GNN prediction framework"
+      ]
+    },
+    "used_fallback": false,
+    "error_type": "",
+    "error_message": "",
+    "final_plan": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质与 HA-GNN 模型历史访问预测机制的相似性和本质区别分析",
+      "retrieval_query_zh": "衰减记忆 动态系统 HA-GNN 历史访问信息 预测机制 比较",
+      "retrieval_query_en": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism",
+      "crawler_query_en": "fading memory dynamical systems HA-GNN historical access prediction",
+      "keywords_zh": [
+        "衰减记忆",
+        "HA-GNN",
+        "动态系统",
+        "历史访问信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "fading memory",
+        "HA-GNN",
+        "dynamical systems",
+        "historical access",
+        "prediction mechanism"
+      ],
+      "required_aspects": [
+        "definition of fading memory in dynamical systems",
+        "function of fading memory in dynamical systems",
+        "mechanism of historical access usage in HA-GNN",
+        "similarities between fading memory and HA-GNN memory",
+        "differences between fading memory and HA-GNN prediction framework"
+      ]
+    }
+  },
+  "retrieval": {
+    "initialized": true,
+    "initialize_error_type": "",
+    "initialize_error_message": "",
+    "retrieval_queries": {
+      "retrieval_query_zh": "衰减记忆 动态系统 HA-GNN 历史访问信息 预测机制 比较",
+      "retrieval_query_en": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism",
+      "keywords_en": [
+        "fading memory",
+        "HA-GNN",
+        "dynamical systems",
+        "historical access",
+        "prediction mechanism"
+      ],
+      "bm25_query": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism fading memory HA-GNN dynamical systems historical access prediction mechanism"
+    },
+    "main_retrieval": {
+      "ok": true,
+      "error_type": "",
+      "error_message": "",
+      "doc_count": 5,
+      "documents": [
+        {
+          "content": "[20] J. Dambre, D. Verstraeten, B. Schrauwen, S. Massar, Information processing capacity of dynamical systems, Sci. Rep. 2 (1) (2012) 514. doi:10.1038/srep00514. [21] J.-P. Ortega, F. Rossmannek, Echoes of the past: A unified perspective on fading memory and echo states (2025). doi:10.48550/ARXIV.2508.19145. [22] L. Gonon, J.-P. Ortega, Fading memory echo state networks are universal, Neural Networks 138 (2021) 10–13. doi:10.1016/j.neunet.2021.01.025.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.04741,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 2,
+                "dense_zh": 6,
+                "dense_en": 2
+              },
+              "rrf_score": 0.04741
+            },
+            "rrf_score": 0.04741
+          }
+        },
+        {
+          "content": "[24] Y. Huo, T. Chaffey, R. Sepulchre, Kernel modelling of fading memory systems (2024). doi:10.48550/ARXIV.2403.11945. [25] R. Sepulchre, Fading memory [from the editor], IEEE Control Systems 41 (1) (2021) 4–5. doi:10.1109/mcs.2020.3033098.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.045208,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 1,
+                "dense_zh": 12,
+                "dense_en": 7
+              },
+              "rrf_score": 0.045208
+            },
+            "rrf_score": 0.045208
+          }
+        },
+        {
+          "content": "## Page 1 State-space fading memory Gustave Bainier(^{a,*}), Antoine Chaillet(^{b}), Rodolphe Sepulchre(^{c,d}), Alessio Franci(^{a,e,*}) (^{a})Dept. of Electrical Engineering and Computer Science, University of Liège, 10 allée de la Découverte, Liège, 4000, Belgium (^{b})Université Paris-Saclay, CNRS, CentraleSupélec, Laboratoire des signaux et systèmes, Gif-sur-Yvette, 91190, France (^{c})KU Leuven, Department of Electrical Engineering (ESAT), STADIUS Center for Dynamical Systems, Signal Processing and Data Analytics, Kasteel Park Arenberg 10, Leuven, 3001, Belgium (^{d})Department of Engineering, University of Cambridge, Trumpington Street, Cambridge, CB2 1PZ, United Kingdom (^{e})WEL Research Institute, Wavre, 1300, Belgium Abstract The fading-memory (FM) property captures the progressive loss of influence of past inputs on a system's current output and has originally been formalized by Boyd and Chua in an operator-theoretic framework. Despite its importance for systems approximation, reservoir computing, and recurrent neural networks, its connection with state-space notions of nonlinear stability, especially incremental ones, remains understudied.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.043244,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 10,
+                "dense_zh": 15,
+                "dense_en": 4
+              },
+              "rrf_score": 0.043244
+            },
+            "rrf_score": 0.043244
+          }
+        },
+        {
+          "content": ". Recurrent neural networks (RNNs) such as long short-term memory (LSTM)(^{9}) and gated recurrent units (GRU)(^{10}) have shown potential in modeling temporal sequences, yet their application to longitudinal neuroimaging data with irregular sampling remains difficult. In this study, we tackle these challenges by introducing a history-aware graph neural network (HA-GNN) model, which integrates rs-fMRI-derived functional connectivity graphs with longitudinal visit information. Our strategy combines a GNN for spatial brain network representation with an RNN for temporal representation, enabling the capture of both organizational characteristics of functional brain networks and their temporal variation",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.032787,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 1,
+                "dense_en": 1
+              },
+              "rrf_score": 0.032787
+            },
+            "rrf_score": 0.032787
+          }
+        },
+        {
+          "content": "N. Tsitsiklis, Worst-case identification of nonlinear fading memory systems, Automatica 31 (3) (1995) 503–508. doi:10.1016/0005-1098(94)00131-2.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.031498,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 4,
+                "dense_en": 3
+              },
+              "rrf_score": 0.031498
+            },
+            "rrf_score": 0.031498
+          }
+        }
+      ],
+      "debug": {
+        "branch_counts": {
+          "bm25_en": 15,
+          "dense_zh": 15,
+          "dense_en": 15
+        },
+        "rrf_pool_count": 20,
+        "returned_count": 5,
+        "bm25_query": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism fading memory HA-GNN dynamical systems historical access prediction mechanism",
+        "retrieval_query_zh": "衰减记忆 动态系统 HA-GNN 历史访问信息 预测机制 比较",
+        "retrieval_query_en": "comparison of fading memory in dynamical systems versus HA-GNN historical access prediction mechanism"
+      }
+    },
+    "branches": {},
+    "fallback_evaluation_input": {
+      "input_source": "none",
+      "branch_order": [
+        "bm25_en",
+        "dense_zh",
+        "dense_en"
+      ],
+      "doc_count": 0,
+      "documents": []
+    }
+  },
+  "evaluation": {
+    "input_source": "main_retrieval",
+    "input_doc_count": 5,
+    "result": {
+      "sufficient": true,
+      "partial_answerable": true,
+      "aspect_coverage": 1.0,
+      "support_strength": 0.6341,
+      "noise_ratio": 0.0,
+      "covered_aspects": [
+        "definition of fading memory in dynamical systems",
+        "function of fading memory in dynamical systems",
+        "mechanism of historical access usage in HA-GNN",
+        "similarities between fading memory and HA-GNN memory",
+        "differences between fading memory and HA-GNN prediction framework"
+      ],
+      "weak_aspects": [],
+      "missing_aspects": [],
+      "aspect_scores": {
+        "definition of fading memory in dynamical systems": 0.8586,
+        "function of fading memory in dynamical systems": 0.8586,
+        "mechanism of historical access usage in HA-GNN": 0.4707,
+        "similarities between fading memory and HA-GNN memory": 0.5475,
+        "differences between fading memory and HA-GNN prediction framework": 0.435
+      },
+      "aspect_best_chunks": {
+        "definition of fading memory in dynamical systems": [
+          2,
+          0,
+          1
+        ],
+        "function of fading memory in dynamical systems": [
+          2,
+          0,
+          1
+        ],
+        "mechanism of historical access usage in HA-GNN": [
+          3,
+          2,
+          0
+        ],
+        "similarities between fading memory and HA-GNN memory": [
+          0,
+          2,
+          3
+        ],
+        "differences between fading memory and HA-GNN prediction framework": [
+          0,
+          2,
+          3
+        ]
+      },
+      "next_action": "answer",
+      "top1_coverage": 0.8586,
+      "avg_top3_coverage": 0.7352,
+      "unique_sources": 2,
+      "reason": "aspect_coverage=1.00, support_strength=0.63, noise_ratio=0.00, missing_aspects_count=0, missing_aspects=none, next_action=answer",
+      "scored_docs": [
+        {
+          "content": "[20] J. Dambre, D. Verstraeten, B. Schrauwen, S. Massar, Information processing capacity of dynamical systems, Sci. Rep. 2 (1) (2012) 514. doi:10.1038/srep00514. [21] J.-P. Ortega, F. Rossmannek, Echoes of the past: A unified perspective on fading memory and echo states (2025). doi:10.48550/ARXIV.2508.19145. [22] L. Gonon, J.-P. Ortega, Fading memory echo state networks are universal, Neural Networks 138 (2021) 10–13. doi:10.1016/j.neunet.2021.01.025.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.7404,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 2,
+                "dense_zh": 6,
+                "dense_en": 2
+              },
+              "rrf_score": 0.04741
+            },
+            "rrf_score": 0.04741
+          }
+        },
+        {
+          "content": "[24] Y. Huo, T. Chaffey, R. Sepulchre, Kernel modelling of fading memory systems (2024). doi:10.48550/ARXIV.2403.11945. [25] R. Sepulchre, Fading memory [from the editor], IEEE Control Systems 41 (1) (2021) 4–5. doi:10.1109/mcs.2020.3033098.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.6065,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 1,
+                "dense_zh": 12,
+                "dense_en": 7
+              },
+              "rrf_score": 0.045208
+            },
+            "rrf_score": 0.045208
+          }
+        },
+        {
+          "content": "## Page 1 State-space fading memory Gustave Bainier(^{a,*}), Antoine Chaillet(^{b}), Rodolphe Sepulchre(^{c,d}), Alessio Franci(^{a,e,*}) (^{a})Dept. of Electrical Engineering and Computer Science, University of Liège, 10 allée de la Découverte, Liège, 4000, Belgium (^{b})Université Paris-Saclay, CNRS, CentraleSupélec, Laboratoire des signaux et systèmes, Gif-sur-Yvette, 91190, France (^{c})KU Leuven, Department of Electrical Engineering (ESAT), STADIUS Center for Dynamical Systems, Signal Processing and Data Analytics, Kasteel Park Arenberg 10, Leuven, 3001, Belgium (^{d})Department of Engineering, University of Cambridge, Trumpington Street, Cambridge, CB2 1PZ, United Kingdom (^{e})WEL Research Institute, Wavre, 1300, Belgium Abstract The fading-memory (FM) property captures the progressive loss of influence of past inputs on a system's current output and has originally been formalized by Boyd and Chua in an operator-theoretic framework. Despite its importance for systems approximation, reservoir computing, and recurrent neural networks, its connection with state-space notions of nonlinear stability, especially incremental ones, remains understudied.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.8586,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 10,
+                "dense_zh": 15,
+                "dense_en": 4
+              },
+              "rrf_score": 0.043244
+            },
+            "rrf_score": 0.043244
+          }
+        },
+        {
+          "content": ". Recurrent neural networks (RNNs) such as long short-term memory (LSTM)(^{9}) and gated recurrent units (GRU)(^{10}) have shown potential in modeling temporal sequences, yet their application to longitudinal neuroimaging data with irregular sampling remains difficult. In this study, we tackle these challenges by introducing a history-aware graph neural network (HA-GNN) model, which integrates rs-fMRI-derived functional connectivity graphs with longitudinal visit information. Our strategy combines a GNN for spatial brain network representation with an RNN for temporal representation, enabling the capture of both organizational characteristics of functional brain networks and their temporal variation",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.535,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 1,
+                "dense_en": 1
+              },
+              "rrf_score": 0.032787
+            },
+            "rrf_score": 0.032787
+          }
+        },
+        {
+          "content": "N. Tsitsiklis, Worst-case identification of nonlinear fading memory systems, Automatica 31 (3) (1995) 503–508. doi:10.1016/0005-1098(94)00131-2.",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.5888,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 4,
+                "dense_en": 3
+              },
+              "rrf_score": 0.031498
+            },
+            "rrf_score": 0.031498
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "output_dir": "C:\\Users\\jack\\Desktop\\demo\\paper_results",
+    "output_prefix": "fading_memory_ha_gnn_diag_20260410_fixed",
+    "step1_optimizer_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_fixed_step1_optimizer.md",
+    "step2_retrieval_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_fixed_step2_retrieval.md",
+    "step3_evaluation_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_fixed_step3_evaluation.md",
+    "trace_json": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_fixed_trace.json"
+  }
+}
