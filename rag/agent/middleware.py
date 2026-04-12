@@ -26,6 +26,7 @@ try:
         select_local_evidence,
     )
     from .runtime import context, log_progress
+    from .tools_impl import search_web_with_tavily
 except ImportError:
     from query.optimizer import AcademicQueryPlanner
     from retrieval.evaluator import evaluate_retrieval
@@ -43,6 +44,7 @@ except ImportError:
         select_local_evidence,
     )
     from agent.runtime import context, log_progress
+    from agent.tools_impl import search_web_with_tavily
 
 
 class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
@@ -165,19 +167,57 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             )
 
             relevance_reason = evaluation.reason
+            web_search_payload = None
+            web_search_used = False
+            web_search_required = not evaluation.sufficient
+            retrieval_next_action = "answer" if evaluation.sufficient else "search_web"
+            search_aspects = (
+                []
+                if evaluation.sufficient
+                else list(
+                    evaluation.missing_aspects
+                    or evaluation.weak_aspects
+                    or query_plan.required_aspects
+                )
+            )
+            remaining_missing_aspects = list(search_aspects)
+
             if not evaluation.sufficient:
                 relevance_reason = f"{relevance_reason}; next_action=search_web"
+                web_search_payload = self._run_forced_web_search(search_aspects)
+                if web_search_payload is not None:
+                    web_search_used = True
+                    web_search_required = False
+                    retrieval_next_action = "answer"
+                    remaining_missing_aspects = list(web_search_payload.uncovered_missing_aspects)
+                    web_evidence = [
+                        normalized_doc_to_final_evidence_item(doc, default_origin="tavily_web")
+                        for doc in web_search_payload.evidence_docs
+                    ]
+                    final_bundle = build_final_evidence_bundle(
+                        query=query_plan.original_query,
+                        local_evidence=local_evidence,
+                        web_evidence=web_evidence,
+                        uncovered_aspects=remaining_missing_aspects,
+                        note=(
+                            "local evidence and Tavily web evidence have been merged for final answering"
+                            if web_evidence
+                            else "web search was required but returned no mergeable web evidence"
+                        ),
+                    )
 
             context.retrieval_result = payload.model_dump()
-            context.set_current_missing_aspects(evaluation.missing_aspects)
+            if web_search_payload is not None:
+                context.set_web_search_result(web_search_payload.model_dump())
+            context.set_current_missing_aspects(remaining_missing_aspects)
             context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
                 content=self._build_retrieval_tool_summary(
                     payload=payload,
                     local_evidence=local_evidence,
-                    missing_aspects=evaluation.missing_aspects,
-                    next_action="answer" if evaluation.sufficient else "search_web",
+                    missing_aspects=remaining_missing_aspects,
+                    next_action=retrieval_next_action,
                 ),
                 tool_call_id=result.tool_call_id,
                 name=result.name,
@@ -191,17 +231,19 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 update={
                     "retrieval_result": payload.model_dump(),
                     "retrieval_sufficient": evaluation.sufficient,
-                    "retrieval_next_action": "answer" if evaluation.sufficient else "search_web",
+                    "retrieval_next_action": retrieval_next_action,
                     "relevance_score": evaluation.support_strength,
                     "relevance_reason": relevance_reason,
                     "relevance_aspect_coverage": evaluation.aspect_coverage,
                     "relevance_support_strength": evaluation.support_strength,
                     "relevance_noise_ratio": evaluation.noise_ratio,
-                    "relevance_missing_aspects": evaluation.missing_aspects,
+                    "relevance_missing_aspects": remaining_missing_aspects,
                     "relevance_weak_aspects": evaluation.weak_aspects,
-                    "web_search_required": not evaluation.sufficient,
-                    "web_search_used": False,
-                    "web_search_result": None,
+                    "web_search_required": web_search_required,
+                    "web_search_used": web_search_used,
+                    "web_search_result": (
+                        web_search_payload.model_dump() if web_search_payload is not None else None
+                    ),
                     "final_evidence": final_bundle.model_dump(),
                     "messages": [updated_message],
                 }
@@ -209,6 +251,27 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         except Exception as exc:
             log_progress(f"检索结果 hook 解析失败，保留原始结果继续执行: {exc}")
             return result
+
+    def _run_forced_web_search(self, missing_aspects: list[str]) -> WebSearchPayload | None:
+        requested_missing_aspects = [str(item or "").strip() for item in missing_aspects if str(item or "").strip()]
+        if not requested_missing_aspects:
+            return None
+
+        try:
+            log_progress(
+                "Auto-running Tavily search because local evidence is insufficient: "
+                f"{requested_missing_aspects}"
+            )
+            raw_payload = search_web_with_tavily.invoke({"missing_aspects": requested_missing_aspects})
+            payload = WebSearchPayload(**json.loads(str(raw_payload)))
+            if payload.evidence_docs:
+                log_progress("Tavily search finished and web evidence has been merged before answering.")
+            else:
+                log_progress("Tavily search finished but returned no mergeable web evidence.")
+            return payload
+        except Exception as exc:
+            log_progress(f"Automatic Tavily search failed; continue with current evidence only: {exc}")
+            return None
 
     def _handle_web_search_result(self, request: ToolCallRequest, result: ToolMessage) -> Command | ToolMessage:
         try:
@@ -444,24 +507,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
 
     def _build_prompt_friendly_final_evidence(self, bundle_like: FinalEvidenceBundle | dict[str, Any]) -> str:
         bundle = bundle_like if isinstance(bundle_like, FinalEvidenceBundle) else FinalEvidenceBundle(**bundle_like)
-        prompt_bundle = {
-            "query": bundle.query,
-            "summary": bundle.summary,
-            "local_evidence": [
-                self._compact_evidence_item(item, content_max_chars=self.PROMPT_EVIDENCE_CONTENT_MAX_CHARS)
-                for item in bundle.local_evidence[: self.PROMPT_LOCAL_EVIDENCE_MAX_ITEMS]
-            ],
-            "web_evidence": [
-                self._compact_evidence_item(item, content_max_chars=self.PROMPT_EVIDENCE_CONTENT_MAX_CHARS)
-                for item in bundle.web_evidence[: self.PROMPT_WEB_EVIDENCE_MAX_ITEMS]
-            ],
-            "uncovered_aspects": list(bundle.uncovered_aspects[:8]),
-            "note": (
-                "Evidence content below is excerpted and truncated for prompt budget control. "
-                "Prefer these items over raw tool payloads."
-            ),
-        }
-        return json.dumps(prompt_bundle, ensure_ascii=False, indent=2)
+        return json.dumps(bundle.model_dump(), ensure_ascii=False, indent=2)
 
     def _compact_evidence_item(self, item: Any, *, content_max_chars: int) -> dict[str, Any]:
         evidence = item if isinstance(item, dict) else item.model_dump()

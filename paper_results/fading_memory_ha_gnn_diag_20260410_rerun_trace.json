@@ -1,0 +1,544 @@
+{
+  "query_source": {
+    "source": "query_file",
+    "path": "C:\\Users\\jack\\Desktop\\demo\\.tmp\\fading_memory_ha_gnn_query_rebuilt_utf8.txt"
+  },
+  "query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "default_query_reference": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+  "runtime": {
+    "cwd": "C:\\Users\\jack\\Desktop\\demo",
+    "repo_root": "C:\\Users\\jack\\Desktop\\demo",
+    "timestamp": "2026-04-10T11:25:50.298572",
+    "llm": {
+      "scheme": "http",
+      "host": "127.0.0.1",
+      "port": 8001,
+      "model": "Qwen/Qwen3.5-9B",
+      "api_key": "EMPTY",
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8001,
+        "local_host": "127.0.0.1",
+        "local_port": 18001
+      },
+      "base_url": "http://127.0.0.1:18001/v1"
+    },
+    "embedding": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8000,
+        "local_host": "127.0.0.1",
+        "local_port": 18000
+      },
+      "base_url": "http://127.0.0.1:18000/v1",
+      "model": "bge-m3"
+    },
+    "ocr": {
+      "ssh": {
+        "ssh_host": "172.26.19.131",
+        "ssh_port": 8888,
+        "ssh_username": "root",
+        "ssh_password": "123456.a",
+        "remote_host": "127.0.0.1",
+        "remote_port": 8002,
+        "local_host": "127.0.0.1",
+        "local_port": 18002
+      },
+      "base_url": "http://127.0.0.1:18002/v1",
+      "model": ""
+    }
+  },
+  "optimizer": {
+    "input_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "input_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "mojibake_marker_count": 0,
+      "cjk_count": 48,
+      "latin_count": 17,
+      "length": 73
+    },
+    "planner_input_question": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+    "prompt_human_message_excerpt": "Return strict JSON with exactly these fields:\n{\n  \"original_query\": \"...\",\n  \"normalized_query_zh\": \"...\",\n  \"retrieval_query_zh\": \"...\",\n  \"retrieval_query_en\": \"...\",\n  \"crawler_query_en\": \"...\",\n  \"keywords_zh\": [\"...\"],\n  \"keywords_en\": [\"...\"],\n  \"required_aspects\": [\"...\"]\n}\n\nRules:\n1. `normalized_query_zh` should be a polished Chinese version of the original intent.\n2. `retrieval_query_zh` is for local Chinese retrieval and should stay concise and natural, while being optimized for retrieving explanatory academic body paragraphs. It should prioritize technical noun phrases, definition-bearing terms, and mechanism-bearing terms that are likely to appear in paper body text, rather than restating the user's comparison question. Avoid conclusion-oriented words such as \"比较\", \"相似性\", and \"区别\" unless they are likely to appear literally in the source text.\n3. `retrieval_query_en` is for semantic retrieval and must preserve the original meaning instead of literal word-by-word translation. It should be optimized for retrieving explanatory academic body paragraphs, especially definition, role, and mechanism descriptions. Prefer a retrieval-oriented technical phrase sequence over a fluent comparative sentence. Preserve the core entities, but avoid packing all sub-questions into one comparison-style query with words such as \"comparison\", \"similarities\", \"differences\", or \"versus\", unless such wording is likely to appear literally in the source text.\n4. `crawler_query_en` is only a short fallback academic search string for title/abstract search.\n5. `keywords_zh` and `keywords_en` m...(truncated)",
+    "raw_response": "\n\n{\n  \"original_query\": \"fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？\",\n  \"normalized_query_zh\": \"动态系统中衰减记忆性质的作用与HA-GNN历史预测机制的本质差异分析\",\n  \"retrieval_query_zh\": \"动态系统 衰减记忆 HA-GNN 历史信息 预测 时序依赖\",\n  \"retrieval_query_en\": \"Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies\",\n  \"crawler_query_en\": \"Fading Memory HA-GNN Dynamic Systems\",\n  \"keywords_zh\": [\"衰减记忆\", \"HA-GNN\", \"动态系统\", \"历史信息\", \"预测机制\"],\n  \"keywords_en\": [\"Fading Memory\", \"HA-GNN\", \"Dynamic Systems\", \"Historical Access\", \"Prediction Mechanism\"],\n  \"required_aspects\": [\n    \"definition of Fading Memory in dynamic systems\",\n    \"role of Fading Memory in dynamic systems\",\n    \"HA-GNN historical access mechanism\",\n    \"prediction mechanism of HA-GNN\",\n    \"differences between Fading Memory and HA-GNN temporal representations\"\n  ]\n}",
+    "raw_response_text_diagnostics": {
+      "has_issues": false,
+      "issue_flags": [],
+      "mojibake_marker_count": 0,
+      "cjk_count": 110,
+      "latin_count": 517,
+      "length": 866
+    },
+    "parsed_json": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质的作用与HA-GNN历史预测机制的本质差异分析",
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史信息 预测 时序依赖",
+      "retrieval_query_en": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies",
+      "crawler_query_en": "Fading Memory HA-GNN Dynamic Systems",
+      "keywords_zh": [
+        "衰减记忆",
+        "HA-GNN",
+        "动态系统",
+        "历史信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "Fading Memory",
+        "HA-GNN",
+        "Dynamic Systems",
+        "Historical Access",
+        "Prediction Mechanism"
+      ],
+      "required_aspects": [
+        "definition of Fading Memory in dynamic systems",
+        "role of Fading Memory in dynamic systems",
+        "HA-GNN historical access mechanism",
+        "prediction mechanism of HA-GNN",
+        "differences between Fading Memory and HA-GNN temporal representations"
+      ]
+    },
+    "used_fallback": false,
+    "error_type": "",
+    "error_message": "",
+    "final_plan": {
+      "original_query": "fading memory（衰减记忆）’这一性质在动态系统中的作用，与HA-GNN模型中利用历史访问信息进行预测的机制之间，有何相似性与本质区别？",
+      "normalized_query_zh": "动态系统中衰减记忆性质的作用与HA-GNN历史预测机制的本质差异分析",
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史信息 预测 时序依赖",
+      "retrieval_query_en": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies",
+      "crawler_query_en": "Fading Memory HA-GNN Dynamic Systems",
+      "keywords_zh": [
+        "衰减记忆",
+        "HA-GNN",
+        "动态系统",
+        "历史信息",
+        "预测机制"
+      ],
+      "keywords_en": [
+        "Fading Memory",
+        "HA-GNN",
+        "Dynamic Systems",
+        "Historical Access",
+        "Prediction Mechanism"
+      ],
+      "required_aspects": [
+        "definition of Fading Memory in dynamic systems",
+        "role of Fading Memory in dynamic systems",
+        "HA-GNN historical access mechanism",
+        "prediction mechanism of HA-GNN",
+        "differences between Fading Memory and HA-GNN temporal representations"
+      ]
+    }
+  },
+  "retrieval": {
+    "initialized": true,
+    "initialize_error_type": "",
+    "initialize_error_message": "",
+    "retrieval_queries": {
+      "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史信息 预测 时序依赖",
+      "retrieval_query_en": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies",
+      "keywords_en": [
+        "Fading Memory",
+        "HA-GNN",
+        "Dynamic Systems",
+        "Historical Access",
+        "Prediction Mechanism"
+      ],
+      "bm25_query": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies Fading Memory HA-GNN Dynamic Systems Historical Access Prediction Mechanism"
+    },
+    "main_retrieval": {
+      "ok": true,
+      "error_type": "",
+      "error_message": "",
+      "doc_count": 5,
+      "documents": [
+        {
+          "content": "\\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.127794,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 15
+              },
+              "rrf_score": 0.127794
+            },
+            "rrf_score": 0.127794
+          }
+        },
+        {
+          "content": ". Recurrent neural networks (RNNs) such as long short-term memory (LSTM)(^{9}) and gated recurrent units (GRU)(^{10}) have shown potential in modeling temporal sequences, yet their application to longitudinal neuroimaging data with irregular sampling remains difficult. In this study, we tackle these challenges by introducing a history-aware graph neural network (HA-GNN) model, which integrates rs-fMRI-derived functional connectivity graphs with longitudinal visit information. Our strategy combines a GNN for spatial brain network representation with an RNN for temporal representation, enabling the capture of both organizational characteristics of functional brain networks and their temporal variation",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.032522,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 1,
+                "dense_en": 2
+              },
+              "rrf_score": 0.032522
+            },
+            "rrf_score": 0.032522
+          }
+        },
+        {
+          "content": ". However, most Send correspondence to M.M.: moghaddami@oakland.edu ## Page 2 existing GNN methods focus on cross-sectional data and do not fully utilize the longitudinal aspects of disease progression.(^{8}) Longitudinal prediction poses additional challenges, including irregular time intervals between clinical visits, missing imaging data, and varying lengths of visit history across subjects.(^{8}) These factors complicate the modeling of temporal processes and restrict the applicability of standard sequential or graph-based models",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.032266,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 3,
+                "dense_en": 1
+              },
+              "rrf_score": 0.032266
+            },
+            "rrf_score": 0.032266
+          }
+        },
+        {
+          "content": "6. CONCLUSIONS In this study, we establish the effectiveness of using resting-state functional MRI and our proposed history-aware graph neural network model for predicting the progression of cognitive impairment. Using focal loss and pretraining, our model demonstrates the ability to predict converter subjects despite data imbalance, missing visits, and irregular visit distances. The results indicate that our model can effectively capture the temporal dynamics of cognitive impairment progression. Our approach offers a promising method for early detection and monitoring of Alzheimer's disease which is crucial for timely intervention and treatment. Subsequent research will focus on further improving the model's performance and generalizability by employing additional data modalities and examining the effects of history length on prediction accuracy. ACKNOWLEDGMENTS This work was supported by the NSF grants #CNS-2349663",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.031514,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 2,
+                "dense_en": 5
+              },
+              "rrf_score": 0.031514
+            },
+            "rrf_score": 0.031514
+          }
+        },
+        {
+          "content": ". Additionally, investigating the relationship between visit history length and prediction accuracy could provide insights into the minimum number of data points required for reliable prognostic predictions. Fourth, while our model achieves respectable performance metrics, the lack of built-in interpretability mechanisms limits its clinical utility. Future iterations should incorporate attention mechanisms or other interpretability tools to identify which brain regions and connections are most influential in driving predictions, as demonstrated in Kim et al.(^{19}) Such interpretability would not only increase clinical trust in the model but could also provide neuroscientific insights into the functional network changes that precede cognitive decline",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.029958,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 11,
+                "dense_en": 3
+              },
+              "rrf_score": 0.029958
+            },
+            "rrf_score": 0.029958
+          }
+        }
+      ],
+      "debug": {
+        "branch_counts": {
+          "bm25_en": 15,
+          "dense_zh": 15,
+          "dense_en": 15
+        },
+        "rrf_pool_count": 20,
+        "returned_count": 5,
+        "bm25_query": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies Fading Memory HA-GNN Dynamic Systems Historical Access Prediction Mechanism",
+        "retrieval_query_zh": "动态系统 衰减记忆 HA-GNN 历史信息 预测 时序依赖",
+        "retrieval_query_en": "Fading Memory Dynamic Systems HA-GNN Historical Access Prediction Mechanism Temporal Dependencies"
+      }
+    },
+    "branches": {},
+    "fallback_evaluation_input": {
+      "input_source": "none",
+      "branch_order": [
+        "bm25_en",
+        "dense_zh",
+        "dense_en"
+      ],
+      "doc_count": 0,
+      "documents": []
+    }
+  },
+  "evaluation": {
+    "input_source": "main_retrieval",
+    "input_doc_count": 5,
+    "result": {
+      "sufficient": false,
+      "partial_answerable": true,
+      "aspect_coverage": 0.8,
+      "support_strength": 0.4643,
+      "noise_ratio": 0.2,
+      "covered_aspects": [
+        "definition of Fading Memory in dynamic systems",
+        "role of Fading Memory in dynamic systems",
+        "prediction mechanism of HA-GNN",
+        "differences between Fading Memory and HA-GNN temporal representations"
+      ],
+      "weak_aspects": [],
+      "missing_aspects": [
+        "HA-GNN historical access mechanism"
+      ],
+      "aspect_scores": {
+        "definition of Fading Memory in dynamic systems": 0.4707,
+        "role of Fading Memory in dynamic systems": 0.4707,
+        "HA-GNN historical access mechanism": 0.31,
+        "prediction mechanism of HA-GNN": 0.535,
+        "differences between Fading Memory and HA-GNN temporal representations": 0.535
+      },
+      "aspect_best_chunks": {
+        "definition of Fading Memory in dynamic systems": [
+          1,
+          3,
+          4
+        ],
+        "role of Fading Memory in dynamic systems": [
+          1,
+          3,
+          4
+        ],
+        "HA-GNN historical access mechanism": [
+          1,
+          2,
+          3
+        ],
+        "prediction mechanism of HA-GNN": [
+          1,
+          2,
+          3
+        ],
+        "differences between Fading Memory and HA-GNN temporal representations": [
+          1,
+          2,
+          3
+        ]
+      },
+      "next_action": "crawl_more",
+      "top1_coverage": 0.535,
+      "avg_top3_coverage": 0.5342,
+      "unique_sources": 2,
+      "reason": "aspect_coverage=0.80, support_strength=0.46, noise_ratio=0.20, missing_aspects_count=1, missing_aspects=HA-GNN historical access mechanism, next_action=crawl_more",
+      "scored_docs": [
+        {
+          "content": "\\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad \\quad",
+          "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "score": 0.1278,
+          "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2603.23814",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "title": "arXiv:2603.23814 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2603.23814",
+            "pdf_link": "https://arxiv.org/pdf/2603.23814",
+            "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "bm25_en"
+              ],
+              "branch_ranks": {
+                "bm25_en": 15
+              },
+              "rrf_score": 0.127794
+            },
+            "rrf_score": 0.127794
+          }
+        },
+        {
+          "content": ". Recurrent neural networks (RNNs) such as long short-term memory (LSTM)(^{9}) and gated recurrent units (GRU)(^{10}) have shown potential in modeling temporal sequences, yet their application to longitudinal neuroimaging data with irregular sampling remains difficult. In this study, we tackle these challenges by introducing a history-aware graph neural network (HA-GNN) model, which integrates rs-fMRI-derived functional connectivity graphs with longitudinal visit information. Our strategy combines a GNN for spatial brain network representation with an RNN for temporal representation, enabling the capture of both organizational characteristics of functional brain networks and their temporal variation",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.535,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 1,
+                "dense_en": 2
+              },
+              "rrf_score": 0.032522
+            },
+            "rrf_score": 0.032522
+          }
+        },
+        {
+          "content": ". However, most Send correspondence to M.M.: moghaddami@oakland.edu ## Page 2 existing GNN methods focus on cross-sectional data and do not fully utilize the longitudinal aspects of disease progression.(^{8}) Longitudinal prediction poses additional challenges, including irregular time intervals between clinical visits, missing imaging data, and varying lengths of visit history across subjects.(^{8}) These factors complicate the modeling of temporal processes and restrict the applicability of standard sequential or graph-based models",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.5346,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 3,
+                "dense_en": 1
+              },
+              "rrf_score": 0.032266
+            },
+            "rrf_score": 0.032266
+          }
+        },
+        {
+          "content": "6. CONCLUSIONS In this study, we establish the effectiveness of using resting-state functional MRI and our proposed history-aware graph neural network model for predicting the progression of cognitive impairment. Using focal loss and pretraining, our model demonstrates the ability to predict converter subjects despite data imbalance, missing visits, and irregular visit distances. The results indicate that our model can effectively capture the temporal dynamics of cognitive impairment progression. Our approach offers a promising method for early detection and monitoring of Alzheimer's disease which is crucial for timely intervention and treatment. Subsequent research will focus on further improving the model's performance and generalizability by employing additional data modalities and examining the effects of history length on prediction accuracy. ACKNOWLEDGMENTS This work was supported by the NSF grants #CNS-2349663",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.5329,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 2,
+                "dense_en": 5
+              },
+              "rrf_score": 0.031514
+            },
+            "rrf_score": 0.031514
+          }
+        },
+        {
+          "content": ". Additionally, investigating the relationship between visit history length and prediction accuracy could provide insights into the minimum number of data points required for reliable prognostic predictions. Fourth, while our model achieves respectable performance metrics, the lack of built-in interpretability mechanisms limits its clinical utility. Future iterations should incorporate attention mechanisms or other interpretability tools to identify which brain regions and connections are most influential in driving predictions, as demonstrated in Kim et al.(^{19}) Such interpretability would not only increase clinical trust in the model but could also provide neuroscientific insights into the functional network changes that precede cognitive decline",
+          "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "score": 0.5275,
+          "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+          "url": "https://arxiv.org/pdf/2604.06469",
+          "origin": "local_kb",
+          "aspects": [],
+          "metadata": {
+            "source": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "title": "arXiv:2604.06469 [ pdf , ps , other ]",
+            "url": "https://arxiv.org/pdf/2604.06469",
+            "pdf_link": "https://arxiv.org/pdf/2604.06469",
+            "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
+            "origin": "local_kb",
+            "retrieval_debug": {
+              "branch_hits": [
+                "dense_zh",
+                "dense_en"
+              ],
+              "branch_ranks": {
+                "dense_zh": 11,
+                "dense_en": 3
+              },
+              "rrf_score": 0.029958
+            },
+            "rrf_score": 0.029958
+          }
+        }
+      ]
+    }
+  },
+  "artifacts": {
+    "output_dir": "C:\\Users\\jack\\Desktop\\demo\\paper_results",
+    "output_prefix": "fading_memory_ha_gnn_diag_20260410_rerun",
+    "step1_optimizer_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_rerun_step1_optimizer.md",
+    "step2_retrieval_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_rerun_step2_retrieval.md",
+    "step3_evaluation_md": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_rerun_step3_evaluation.md",
+    "trace_json": "C:\\Users\\jack\\Desktop\\demo\\paper_results\\fading_memory_ha_gnn_diag_20260410_rerun_trace.json"
+  }
+}

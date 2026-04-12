@@ -695,6 +695,9 @@ class RAGSystem:
 
     def update_rag_system(self, chunk_strategy="semantic_arxiv"):
         """Rebuild the FAISS index and refresh the retriever."""
+        if self.embeddings is None:
+            self.setup_embeddings()
+
         documents = self.load_md_documents()
         if chunk_strategy == "optimized":
             self.vectorstore = self.setup_vector_store_optimized_fallback(documents)

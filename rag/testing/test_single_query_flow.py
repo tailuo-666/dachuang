@@ -10,7 +10,7 @@ import uuid
 from unittest import mock
 
 from langchain_core.embeddings import Embeddings
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 
 try:
     import fitz
@@ -20,6 +20,8 @@ except ModuleNotFoundError:
 try:
     from rag.agent.evidence import annotate_local_documents, build_final_evidence_bundle, select_local_evidence
     from rag.agent.middleware import AcademicResearchMiddleware
+    import rag.agent.middleware as agent_middleware_module
+    from rag.agent.runtime import context as research_context
     import rag.llm_factory as llm_factory_module
     import rag.rag_system as rag_system_module
     from rag.crawlers.arxiv import ArxivCrawlerIntegrated
@@ -47,6 +49,8 @@ try:
 except ImportError:
     from agent.evidence import annotate_local_documents, build_final_evidence_bundle, select_local_evidence
     from agent.middleware import AcademicResearchMiddleware
+    import agent.middleware as agent_middleware_module
+    from agent.runtime import context as research_context
     import llm_factory as llm_factory_module
     import rag_system as rag_system_module
     from crawlers.arxiv import ArxivCrawlerIntegrated
@@ -415,7 +419,7 @@ class MiddlewarePromptBudgetTests(unittest.TestCase):
             web_search_tool_name="search_web_with_tavily",
         )
 
-    def test_prompt_friendly_final_evidence_truncates_and_limits_items(self):
+    def test_prompt_friendly_final_evidence_keeps_full_content_and_all_items(self):
         long_content = "A" * 4000
         bundle = FinalEvidenceBundle(
             query="compare fading memory and HA-GNN",
@@ -448,12 +452,11 @@ class MiddlewarePromptBudgetTests(unittest.TestCase):
         compact = json.loads(compact_text)
 
         self.assertEqual(len(compact["local_evidence"]), 1)
-        self.assertEqual(len(compact["web_evidence"]), self.middleware.PROMPT_WEB_EVIDENCE_MAX_ITEMS)
-        self.assertIn("content_excerpt", compact["local_evidence"][0])
-        self.assertNotIn('"content":', compact_text)
-        self.assertTrue(
-            compact["local_evidence"][0]["content_excerpt"].endswith("...(truncated)")
-        )
+        self.assertEqual(len(compact["web_evidence"]), 7)
+        self.assertEqual(compact["local_evidence"][0]["content"], long_content)
+        self.assertEqual(compact["web_evidence"][-1]["content"], long_content)
+        self.assertIn('"content":', compact_text)
+        self.assertNotIn("content_excerpt", compact["local_evidence"][0])
 
     def test_tool_summaries_stay_compact(self):
         long_content = "B" * 3000
@@ -516,6 +519,266 @@ class MiddlewarePromptBudgetTests(unittest.TestCase):
         self.assertLess(len(web_summary), 2000)
         self.assertNotIn(long_content, retrieval_summary)
         self.assertNotIn(long_content, web_summary)
+
+
+class MiddlewareAutoWebSearchTests(unittest.TestCase):
+    def setUp(self):
+        fake_json = """
+        {
+          "original_query": "compare fading memory and HA-GNN",
+          "normalized_query_zh": "比较 fading memory 和 HA-GNN",
+          "retrieval_query_zh": "衰减记忆 动态系统 HA-GNN 历史访问",
+          "retrieval_query_en": "fading memory dynamic systems HA-GNN historical access",
+          "crawler_query_en": "fading memory HA-GNN",
+          "keywords_zh": ["衰减记忆", "HA-GNN"],
+          "keywords_en": ["fading memory", "HA-GNN"],
+          "required_aspects": [
+            "definition of fading memory in dynamic systems",
+            "HA-GNN historical access mechanism"
+          ]
+        }
+        """
+        self.middleware = AcademicResearchMiddleware(
+            FakeLLM(fake_json),
+            retrieve_tool_name="retrieve_local_kb",
+            web_search_tool_name="search_web_with_tavily",
+        )
+        self.plan = AcademicQueryPlan(
+            original_query="compare fading memory and HA-GNN",
+            normalized_query_zh="比较 fading memory 和 HA-GNN",
+            retrieval_query_zh="衰减记忆 动态系统 HA-GNN 历史访问",
+            retrieval_query_en="fading memory dynamic systems HA-GNN historical access",
+            crawler_query_en="fading memory HA-GNN",
+            keywords_zh=["衰减记忆", "HA-GNN"],
+            keywords_en=["fading memory", "HA-GNN"],
+            required_aspects=[
+                "definition of fading memory in dynamic systems",
+                "HA-GNN historical access mechanism",
+            ],
+        )
+        research_context.reset()
+        self.addCleanup(research_context.reset)
+
+    def _make_retrieval_tool_message(self, docs: list[NormalizedDocument]) -> ToolMessage:
+        payload = RetrievalPayload(
+            status="success",
+            message="ok",
+            query="衰减记忆 动态系统 HA-GNN 历史访问",
+            doc_count=len(docs),
+            docs=docs,
+        )
+        return ToolMessage(
+            content=payload.model_dump_json(),
+            tool_call_id="call_retrieve_1",
+            name="retrieve_local_kb",
+        )
+
+    def test_retrieval_hook_auto_merges_web_evidence_when_search_is_needed(self):
+        local_doc = NormalizedDocument(
+            content="Local fading memory definition.",
+            source="local.md",
+            score=0.7,
+            title="Local Paper",
+            url="https://example.com/local",
+            origin="local_kb",
+            metadata={"title": "Local Paper", "url": "https://example.com/local", "origin": "local_kb"},
+        )
+        local_item = FinalEvidenceItem(
+            origin="local_kb",
+            content=local_doc.content,
+            source=local_doc.source,
+            title=local_doc.title,
+            url=local_doc.url,
+            aspects=["definition of fading memory in dynamic systems"],
+            score=0.7,
+            metadata=local_doc.metadata,
+        )
+        web_doc = NormalizedDocument(
+            content="Web evidence for HA-GNN historical access mechanism.",
+            source="web source",
+            score=0.9,
+            title="Web Paper",
+            url="https://example.com/web",
+            origin="tavily_web",
+            aspects=["HA-GNN historical access mechanism"],
+            metadata={"title": "Web Paper", "url": "https://example.com/web", "origin": "tavily_web"},
+        )
+        web_payload = WebSearchPayload(
+            status="success",
+            message="ok",
+            requested_missing_aspects=["HA-GNN historical access mechanism"],
+            covered_missing_aspects=["HA-GNN historical access mechanism"],
+            uncovered_missing_aspects=[],
+            search_queries=[
+                WebSearchQuery(
+                    aspect="HA-GNN historical access mechanism",
+                    query="HA-GNN historical access mechanism",
+                )
+            ],
+            results=[],
+            evidence_docs=[web_doc],
+        )
+        evaluation = mock.Mock(
+            sufficient=False,
+            reason="local evidence is insufficient",
+            support_strength=0.45,
+            aspect_coverage=0.5,
+            noise_ratio=0.1,
+            missing_aspects=["HA-GNN historical access mechanism"],
+            weak_aspects=[],
+            scored_docs=[local_doc],
+        )
+        request = mock.Mock()
+        request.state = {
+            "query_plan": self.plan.model_dump(),
+            "final_evidence": None,
+        }
+        request.tool_call = {"name": "retrieve_local_kb"}
+
+        with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
+            with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
+                with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
+                    with mock.patch.object(
+                        self.middleware,
+                        "_run_forced_web_search",
+                        return_value=web_payload,
+                    ) as mocked_search:
+                        result = self.middleware._handle_retrieval_result(
+                            request,
+                            self._make_retrieval_tool_message([local_doc]),
+                        )
+
+        self.assertEqual(result.update["retrieval_next_action"], "answer")
+        self.assertFalse(result.update["web_search_required"])
+        self.assertTrue(result.update["web_search_used"])
+        self.assertEqual(result.update["relevance_missing_aspects"], [])
+        self.assertEqual(result.update["web_search_result"]["status"], "success")
+        self.assertEqual(len(result.update["final_evidence"]["web_evidence"]), 1)
+        self.assertEqual(result.update["final_evidence"]["web_evidence"][0]["origin"], "tavily_web")
+        mocked_search.assert_called_once_with(["HA-GNN historical access mechanism"])
+
+    def test_retrieval_hook_skips_web_search_when_local_evidence_is_sufficient(self):
+        local_doc = NormalizedDocument(
+            content="Local evidence covers all aspects.",
+            source="local.md",
+            score=0.8,
+            title="Local Paper",
+            url="https://example.com/local",
+            origin="local_kb",
+            metadata={"title": "Local Paper", "url": "https://example.com/local", "origin": "local_kb"},
+        )
+        local_item = FinalEvidenceItem(
+            origin="local_kb",
+            content=local_doc.content,
+            source=local_doc.source,
+            title=local_doc.title,
+            url=local_doc.url,
+            aspects=list(self.plan.required_aspects),
+            score=0.8,
+            metadata=local_doc.metadata,
+        )
+        evaluation = mock.Mock(
+            sufficient=True,
+            reason="local evidence is sufficient",
+            support_strength=0.8,
+            aspect_coverage=1.0,
+            noise_ratio=0.0,
+            missing_aspects=[],
+            weak_aspects=[],
+            scored_docs=[local_doc],
+        )
+        request = mock.Mock()
+        request.state = {
+            "query_plan": self.plan.model_dump(),
+            "final_evidence": None,
+        }
+        request.tool_call = {"name": "retrieve_local_kb"}
+
+        with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
+            with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
+                with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
+                    with mock.patch.object(self.middleware, "_run_forced_web_search") as mocked_search:
+                        result = self.middleware._handle_retrieval_result(
+                            request,
+                            self._make_retrieval_tool_message([local_doc]),
+                        )
+
+        self.assertEqual(result.update["retrieval_next_action"], "answer")
+        self.assertFalse(result.update["web_search_required"])
+        self.assertFalse(result.update["web_search_used"])
+        self.assertIsNone(result.update["web_search_result"])
+        self.assertEqual(result.update["relevance_missing_aspects"], [])
+        self.assertEqual(result.update["final_evidence"]["web_evidence"], [])
+        mocked_search.assert_not_called()
+
+    def test_retrieval_hook_falls_back_to_weak_aspects_when_missing_aspects_is_empty(self):
+        local_doc = NormalizedDocument(
+            content="Local evidence is weak but partially relevant.",
+            source="local.md",
+            score=0.55,
+            title="Local Paper",
+            url="https://example.com/local",
+            origin="local_kb",
+            metadata={"title": "Local Paper", "url": "https://example.com/local", "origin": "local_kb"},
+        )
+        local_item = FinalEvidenceItem(
+            origin="local_kb",
+            content=local_doc.content,
+            source=local_doc.source,
+            title=local_doc.title,
+            url=local_doc.url,
+            aspects=["definition of fading memory in dynamic systems"],
+            score=0.55,
+            metadata=local_doc.metadata,
+        )
+        web_payload = WebSearchPayload(
+            status="success",
+            message="ok",
+            requested_missing_aspects=["HA-GNN historical access mechanism"],
+            covered_missing_aspects=["HA-GNN historical access mechanism"],
+            uncovered_missing_aspects=[],
+            search_queries=[
+                WebSearchQuery(
+                    aspect="HA-GNN historical access mechanism",
+                    query="HA-GNN historical access mechanism",
+                )
+            ],
+            results=[],
+            evidence_docs=[],
+        )
+        evaluation = mock.Mock(
+            sufficient=False,
+            reason="support is weak",
+            support_strength=0.35,
+            aspect_coverage=1.0,
+            noise_ratio=0.3,
+            missing_aspects=[],
+            weak_aspects=["HA-GNN historical access mechanism"],
+            scored_docs=[local_doc],
+        )
+        request = mock.Mock()
+        request.state = {
+            "query_plan": self.plan.model_dump(),
+            "final_evidence": None,
+        }
+        request.tool_call = {"name": "retrieve_local_kb"}
+
+        with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
+            with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
+                with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
+                    with mock.patch.object(
+                        self.middleware,
+                        "_run_forced_web_search",
+                        return_value=web_payload,
+                    ) as mocked_search:
+                        result = self.middleware._handle_retrieval_result(
+                            request,
+                            self._make_retrieval_tool_message([local_doc]),
+                        )
+
+        self.assertEqual(result.update["retrieval_next_action"], "answer")
+        self.assertEqual(result.update["relevance_missing_aspects"], [])
+        mocked_search.assert_called_once_with(["HA-GNN historical access mechanism"])
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
@@ -886,6 +1149,37 @@ class RAGChunkingTests(unittest.TestCase):
         )
         self.assertEqual(fake_vectorstore.saved_paths, ["./faiss"])
 
+    def test_update_rag_system_initializes_embeddings_when_missing(self):
+        rag_system = RAGSystem()
+        docs = [DummyLangChainDoc("Academic text for indexing.", "sample.md", title="Sample Paper")]
+        fake_embeddings = object()
+        fake_vectorstore = object()
+
+        def assign_embeddings(_embedding_model_path=None):
+            rag_system.embeddings = fake_embeddings
+
+        with mock.patch.object(rag_system, "setup_embeddings", side_effect=assign_embeddings) as mocked_setup_embeddings:
+            with mock.patch.object(rag_system, "load_md_documents", return_value=docs):
+                with mock.patch.object(
+                    rag_system,
+                    "setup_vector_store_semantic_arxiv",
+                    return_value=fake_vectorstore,
+                ) as mocked_setup_vectorstore:
+                    with mock.patch.object(
+                        rag_system,
+                        "setup_fallback_retriever",
+                        return_value="retriever",
+                    ) as mocked_setup_retriever:
+                        success = rag_system.update_rag_system(chunk_strategy="semantic_arxiv")
+
+        self.assertTrue(success)
+        mocked_setup_embeddings.assert_called_once_with()
+        mocked_setup_vectorstore.assert_called_once_with(docs)
+        mocked_setup_retriever.assert_called_once_with(k=rag_system_module.FINAL_TOP_K)
+        self.assertIs(rag_system.embeddings, fake_embeddings)
+        self.assertIs(rag_system.vectorstore, fake_vectorstore)
+        self.assertEqual(rag_system.retriever, "retriever")
+
 
 class RemoteOCRClientTests(unittest.TestCase):
     def _mock_response(self, payload):
@@ -991,6 +1285,120 @@ class PDFProcessorOCRCleaningTests(unittest.TestCase):
         self.assertNotIn("demon-\nstrated", md_content)
         self.assertIn("demonstrated to be capable.", md_content)
         self.assertIn("Chunting Zhou(1)", md_content)
+
+    def test_trim_reference_tail_removes_references_in_last_30_percent_pages(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        processor = PDFProcessor(output_dir="./md", ocr_client=FakeOCRClient([]))
+        cleaned_pages = [
+            "Intro page 1",
+            "Body page 2",
+            "Body page 3",
+            "Body page 4",
+            "Body page 5",
+            "Body page 6",
+            "Body page 7",
+            "Body page 8",
+            "Valid final discussion paragraph.\n\nReferences\n\n[1] First ref.\n[2] Second ref.",
+            "[3] Third ref on next page.",
+        ]
+
+        trimmed = processor._trim_reference_tail(cleaned_pages)
+
+        self.assertEqual(len(trimmed), 9)
+        self.assertEqual(trimmed[-1], "Valid final discussion paragraph.")
+        self.assertNotIn("References", "\n".join(trimmed))
+        self.assertNotIn("[1] First ref.", "\n".join(trimmed))
+
+    def test_trim_reference_tail_supports_case_insensitive_bibliography(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        processor = PDFProcessor(output_dir="./md", ocr_client=FakeOCRClient([]))
+        cleaned_pages = [
+            "Body page 1",
+            "Body page 2",
+            "Closing paragraph.\n\nbIbLiOgRaPhY\n\n[1] Ref entry.",
+        ]
+
+        trimmed = processor._trim_reference_tail(cleaned_pages)
+
+        self.assertEqual(trimmed, ["Body page 1", "Body page 2", "Closing paragraph."])
+
+    def test_trim_reference_tail_ignores_heading_outside_tail_window(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        processor = PDFProcessor(output_dir="./md", ocr_client=FakeOCRClient([]))
+        cleaned_pages = [
+            "Intro page 1",
+            "Early section.\n\nReferences\n\n[1] This should stay because it is too early.",
+            "Body page 3",
+            "Body page 4",
+            "Body page 5",
+            "Body page 6",
+            "Body page 7",
+            "Body page 8",
+            "Body page 9",
+            "Body page 10",
+        ]
+
+        trimmed = processor._trim_reference_tail(cleaned_pages)
+
+        self.assertEqual(trimmed, cleaned_pages)
+
+    def test_trim_reference_tail_requires_numbered_reference_entries(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        processor = PDFProcessor(output_dir="./md", ocr_client=FakeOCRClient([]))
+        cleaned_pages = [
+            "Body page 1",
+            "Closing paragraph.\n\nReferences\n\nThis section mentions related work but has no numbered entries.",
+            "Appendix content without numbered references.",
+        ]
+
+        trimmed = processor._trim_reference_tail(cleaned_pages)
+
+        self.assertEqual(trimmed, cleaned_pages)
+
+    def test_process_pdf_folder_strips_reference_tail_and_keeps_metadata(self):
+        if PDFProcessor is None:
+            self.skipTest("PDFProcessor dependencies are not available in the current test environment")
+
+        pdf_dir = self._workspace_tempdir("ocr_pdf_reference_input")
+        md_dir = self._workspace_tempdir("ocr_md_reference_output")
+        pdf_path = os.path.join(pdf_dir, "Reference Sample.pdf")
+        self._create_multi_page_pdf(pdf_path, 4)
+
+        processor = PDFProcessor(
+            output_dir=md_dir,
+            lang="en",
+            dpi=72,
+            ocr_client=FakeOCRClient(
+                [
+                    "Title\nIntroduction\nBody page one.",
+                    "Method\nBody page two.",
+                    "Conclusion\nFinal conclusion paragraph.\n\nREFERENCES\n\n[1] First reference.",
+                    "[2] Second reference continues on the next page.",
+                ]
+            ),
+        )
+
+        processed_files = processor.process_pdf_folder(pdf_dir)
+
+        self.assertEqual(len(processed_files), 1)
+        md_path = os.path.join(md_dir, "Reference Sample.md")
+        sidecar_path = os.path.join(md_dir, "Reference Sample.metadata.json")
+        self.assertTrue(os.path.exists(sidecar_path))
+        with open(md_path, "r", encoding="utf-8") as file:
+            md_content = file.read()
+
+        self.assertIn("Final conclusion paragraph.", md_content)
+        self.assertNotIn("REFERENCES", md_content)
+        self.assertNotIn("[1] First reference.", md_content)
+        self.assertNotIn("## Page 4", md_content)
 
 
 class StandaloneCrawlerIngestionTests(unittest.TestCase):

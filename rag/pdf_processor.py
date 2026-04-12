@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import glob
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -28,9 +29,12 @@ SECTION_HEADINGS = {
     "discussion",
     "conclusion",
     "references",
+    "bibliography",
     "acknowledgments",
     "acknowledgements",
 }
+REFERENCE_TAIL_HEADING_RE = re.compile(r"(?im)^(references|bibliography)\s*$")
+REFERENCE_TAIL_ENTRY_RE = re.compile(r"\[\d+\]")
 
 
 class PDFProcessor:
@@ -318,6 +322,47 @@ class PDFProcessor:
             cleaned_pages.append(page_text)
         return cleaned_pages
 
+    def _reference_tail_window_start(self, page_count: int) -> int:
+        if page_count <= 0:
+            return 0
+        tail_page_count = max(1, math.ceil(page_count * 0.3))
+        return max(0, page_count - tail_page_count)
+
+    def _find_reference_tail_cut(self, cleaned_pages: list[str]) -> tuple[int, int] | None:
+        page_count = len(cleaned_pages)
+        if page_count <= 0:
+            return None
+
+        tail_start = self._reference_tail_window_start(page_count)
+        for page_index in range(tail_start, page_count):
+            page_text = str(cleaned_pages[page_index] or "")
+            if not page_text.strip():
+                continue
+
+            match = REFERENCE_TAIL_HEADING_RE.search(page_text)
+            if not match:
+                continue
+
+            tail_parts = [page_text[match.start() :], *cleaned_pages[page_index + 1 :]]
+            tail_text = "\n\n".join(part for part in tail_parts if str(part or "").strip())
+            if not REFERENCE_TAIL_ENTRY_RE.search(tail_text):
+                continue
+            return page_index, match.start()
+        return None
+
+    def _trim_reference_tail(self, cleaned_pages: list[str]) -> list[str]:
+        cut_point = self._find_reference_tail_cut(cleaned_pages)
+        if cut_point is None:
+            return list(cleaned_pages)
+
+        page_index, char_index = cut_point
+        trimmed_pages = list(cleaned_pages[: page_index + 1])
+        trimmed_pages[page_index] = str(trimmed_pages[page_index][:char_index]).rstrip()
+
+        while trimmed_pages and not str(trimmed_pages[-1] or "").strip():
+            trimmed_pages.pop()
+        return trimmed_pages
+
     def _pdf_to_text(self, pdf_path: str, out_md: str) -> dict[str, Any]:
         doc = fitz.open(pdf_path)
         doc_metadata = self._normalize_pdf_metadata(pdf_path, doc)
@@ -334,6 +379,7 @@ class PDFProcessor:
             doc.close()
 
         cleaned_pages = self._clean_pages(page_lines)
+        cleaned_pages = self._trim_reference_tail(cleaned_pages)
         os.makedirs(os.path.dirname(out_md) or self.output_dir, exist_ok=True)
         md_parts = [f"## Page {index + 1}\n\n{page_text}" for index, page_text in enumerate(cleaned_pages)]
         with open(out_md, "w", encoding="utf-8") as file:
