@@ -29,6 +29,13 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
 def _dedupe_strings(items: list[str] | None) -> list[str]:
     deduped: list[str] = []
     seen: set[str] = set()
@@ -113,8 +120,10 @@ def normalized_doc_to_final_evidence_item(
     metadata["url"] = url
     metadata["origin"] = origin
     metadata["aspects"] = aspects
+    metadata["index"] = _safe_int(metadata.get("index"))
 
     return FinalEvidenceItem(
+        index=_safe_int(metadata.get("index")),
         origin=origin,
         content=str(normalized.content or "").strip(),
         source=str(normalized.source or title or url or origin).strip() or origin,
@@ -129,6 +138,7 @@ def normalized_doc_to_final_evidence_item(
 def final_evidence_item_to_normalized_doc(item: FinalEvidenceItem | dict[str, Any]) -> NormalizedDocument:
     evidence = item if isinstance(item, FinalEvidenceItem) else FinalEvidenceItem(**item)
     metadata = dict(evidence.metadata or {})
+    metadata["index"] = evidence.index
     metadata["title"] = evidence.title
     metadata["url"] = evidence.url
     metadata["origin"] = evidence.origin
@@ -178,16 +188,34 @@ def build_final_evidence_bundle(
     uncovered_aspects: list[str] | None = None,
     note: str = "",
 ) -> FinalEvidenceBundle:
-    local_items = [
+    raw_local_items = [
         item if isinstance(item, FinalEvidenceItem) else FinalEvidenceItem(**item)
         for item in (local_evidence or [])
     ]
-    web_items = [
+    raw_web_items = [
         item if isinstance(item, FinalEvidenceItem) else FinalEvidenceItem(**item)
         for item in (web_evidence or [])
     ]
     uncovered = _dedupe_strings(uncovered_aspects)
-    all_items = [*local_items, *web_items]
+    local_items: list[FinalEvidenceItem] = []
+    web_items: list[FinalEvidenceItem] = []
+    all_items: list[FinalEvidenceItem] = []
+
+    next_index = 1
+    for item in raw_local_items:
+        metadata = dict(item.metadata or {})
+        metadata["index"] = next_index
+        assigned_item = item.model_copy(update={"index": next_index, "metadata": metadata})
+        local_items.append(assigned_item)
+        all_items.append(assigned_item)
+        next_index += 1
+    for item in raw_web_items:
+        metadata = dict(item.metadata or {})
+        metadata["index"] = next_index
+        assigned_item = item.model_copy(update={"index": next_index, "metadata": metadata})
+        web_items.append(assigned_item)
+        all_items.append(assigned_item)
+        next_index += 1
 
     summary_parts = [
         f"local_evidence={len(local_items)}",

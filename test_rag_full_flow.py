@@ -196,18 +196,6 @@ def check_local_rag_artifacts() -> dict[str, Any]:
     }
 
 
-def extract_final_answer(agent_result: dict[str, Any]) -> str:
-    messages = agent_result.get("messages", [])
-    for msg in reversed(messages):
-        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-        tool_calls = getattr(msg, "tool_calls", None) or (
-            msg.get("tool_calls") if isinstance(msg, dict) else None
-        )
-        if content and not tool_calls:
-            return str(content).strip()
-    return ""
-
-
 def build_answer_preview(answer: str, limit: int = 400) -> str:
     cleaned = str(answer or "").strip()
     if len(cleaned) <= limit:
@@ -256,16 +244,41 @@ def run_full_flow(query: str) -> dict[str, Any]:
 
     service = RagService()
     result = service.run(query=query)
-    answer = extract_final_answer(result)
     final_evidence = context.final_evidence or {}
-    final_items = context.final_evidence_items or []
+    final_items = [
+        dict(item)
+        for item in (context.final_evidence_items or [])
+        if isinstance(item, dict)
+    ]
+    structured_answer = service.parse_final_response(
+        result,
+        final_evidence_items=final_items,
+    )
+    answer = structured_answer.answer
     missing_aspects = list(context.current_missing_aspects or [])
     web_search_result = context.web_search_result or {}
+    evidence_lookup = {
+        int(item.get("index") or 0): item
+        for item in final_items
+        if int(item.get("index") or 0) > 0
+    }
+    referenced_evidence = [
+        {
+            "index": index,
+            "origin": evidence_lookup[index].get("origin", ""),
+            "title": evidence_lookup[index].get("title", ""),
+            "url": evidence_lookup[index].get("url", ""),
+            "aspects": evidence_lookup[index].get("aspects", []) or [],
+        }
+        for index in structured_answer.evidence_list
+        if index in evidence_lookup
+    ]
 
     return {
         "ok": bool(answer),
         "answer": answer,
         "answer_preview": build_answer_preview(answer),
+        "evidence_list": structured_answer.evidence_list,
         "retrieval_next_action": result.get("retrieval_next_action"),
         "relevance_reason": result.get("relevance_reason"),
         "relevance_missing_aspects": result.get("relevance_missing_aspects"),
@@ -274,15 +287,7 @@ def run_full_flow(query: str) -> dict[str, Any]:
         "web_search_message": web_search_result.get("message", ""),
         "final_evidence_summary": final_evidence.get("summary", ""),
         "final_evidence_item_count": len(final_items),
-        "sources": [
-            {
-                "origin": item.get("origin", ""),
-                "title": item.get("title", ""),
-                "url": item.get("url", ""),
-                "aspects": item.get("aspects", []) or [],
-            }
-            for item in final_items[:8]
-        ],
+        "referenced_evidence": referenced_evidence,
     }
 
 

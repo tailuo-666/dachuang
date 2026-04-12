@@ -139,6 +139,7 @@ class WebSearchPayload(BaseModel):
 class FinalEvidenceItem(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    index: int = 0
     origin: str
     content: str
     source: str
@@ -158,6 +159,13 @@ class FinalEvidenceBundle(BaseModel):
     web_evidence: list[FinalEvidenceItem] = Field(default_factory=list)
     all_evidence: list[FinalEvidenceItem] = Field(default_factory=list)
     uncovered_aspects: list[str] = Field(default_factory=list)
+
+
+class AgentAnswerPayload(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    answer: str
+    evidence_list: list[int] = Field(default_factory=list)
 
 
 class AspectRewritePayload(BaseModel):

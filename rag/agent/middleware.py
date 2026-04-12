@@ -210,12 +210,13 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             if web_search_payload is not None:
                 context.set_web_search_result(web_search_payload.model_dump())
             context.set_current_missing_aspects(remaining_missing_aspects)
+            self._log_final_evidence_bundle(final_bundle)
             context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
                 content=self._build_retrieval_tool_summary(
                     payload=payload,
-                    local_evidence=local_evidence,
+                    local_evidence=list(final_bundle.local_evidence),
                     missing_aspects=remaining_missing_aspects,
                     next_action=retrieval_next_action,
                 ),
@@ -298,6 +299,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 uncovered_aspects=payload.uncovered_missing_aspects,
                 note="local evidence and Tavily web evidence have been merged for final answering",
             )
+            self._log_final_evidence_bundle(final_bundle)
             context.set_final_evidence(final_bundle.model_dump())
 
             updated_message = ToolMessage(
@@ -410,16 +412,16 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         final_evidence_raw: dict[str, Any] | None,
     ) -> str:
         if query_plan is None:
-            return "当前未注入查询计划。"
+            return "当前尚未注入查询计划。"
 
         if retrieval_sufficient is None:
             stage_hint = "下一步必须调用 `retrieve_local_kb`，参数使用 retrieval_query_zh。"
         elif retrieval_sufficient:
-            stage_hint = "本地证据已经足够，禁止继续调用工具，直接使用 final_evidence_bundle 回答。"
+            stage_hint = "本地证据已经足够，禁止继续调用工具，直接基于 Final Evidence Bundle 回答。"
         elif retrieval_next_action == "search_web":
             stage_hint = "本地证据不足，下一步必须调用 `search_web_with_tavily`，参数直接使用当前 missing_aspects 列表。"
         else:
-            stage_hint = "如果 final_evidence_bundle 已存在，请直接基于它回答。"
+            stage_hint = "如果 Final Evidence Bundle 已存在，请直接基于它回答。"
 
         metrics_text = (
             "尚未评估"
@@ -455,10 +457,14 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             f"- workflow_constraint: {stage_hint}\n"
             "## Final Evidence Bundle\n"
             f"{final_evidence_text}\n"
-            "最终回答必须优先依据 Final Evidence Bundle。"
-            " 其中每条证据都已经标准化为 origin/content/aspects/title/url。"
-            " 请优先按 aspect 组织回答，明确区分 local_kb 与 tavily_web。"
-            " 如果 uncovered_aspects 非空，必须明确指出仍未覆盖的点。"
+           "Final answers must prioritize the Final Evidence Bundle.\n"
+           "Each piece of evidence has already been normalized and includes index / origin / content / aspects / title / url / source.\n"
+           "The index is the only valid citation identifier within this response. You may read title, url, and origin to understand the evidence, but do not explicitly include them in the final output.\n"
+            "The final output must be a JSON object containing exactly two fields: answer and evidence_list.\n"
+            "The answer must be in Chinese and should be organized primarily by aspect; do not use phrases such as \"local knowledge base\", \"web search\", \"Tavily\", or \"source type\".\n"
+            "If a sentence or paragraph uses a piece of evidence, append the corresponding [index] at the end of that sentence or paragraph; if a conclusion is supported by multiple pieces of evidence, cite them as [1][3].\n"
+            "Only cite indexes that exist in the Final Evidence Bundle; do not fabricate citations; if uncovered_aspects is non-empty, ignore the uncovered parts and do not explicitly elaborate on them.\n"
+            "The evidence_list must include only the indexes that are actually cited in the answer. Do not output Markdown code blocks, and do not include any additional explanations."
         )
 
     def _build_retrieval_tool_summary(
@@ -507,12 +513,21 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
 
     def _build_prompt_friendly_final_evidence(self, bundle_like: FinalEvidenceBundle | dict[str, Any]) -> str:
         bundle = bundle_like if isinstance(bundle_like, FinalEvidenceBundle) else FinalEvidenceBundle(**bundle_like)
-        return json.dumps(bundle.model_dump(), ensure_ascii=False, indent=2)
+        prompt_bundle = {
+            "query": bundle.query,
+            "summary": bundle.summary,
+            "local_evidence": [self._prompt_friendly_evidence_item(item) for item in bundle.local_evidence],
+            "web_evidence": [self._prompt_friendly_evidence_item(item) for item in bundle.web_evidence],
+            "all_evidence": [self._prompt_friendly_evidence_item(item) for item in bundle.all_evidence],
+            "uncovered_aspects": list(bundle.uncovered_aspects),
+        }
+        return json.dumps(prompt_bundle, ensure_ascii=False, indent=2)
 
     def _compact_evidence_item(self, item: Any, *, content_max_chars: int) -> dict[str, Any]:
         evidence = item if isinstance(item, dict) else item.model_dump()
         content = self._truncate_text(str(evidence.get("content") or "").strip(), content_max_chars)
         return {
+            "index": int(evidence.get("index") or 0),
             "origin": str(evidence.get("origin") or "").strip(),
             "title": str(evidence.get("title") or "").strip(),
             "url": str(evidence.get("url") or "").strip(),
@@ -520,6 +535,32 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             "score": evidence.get("score"),
             "content_excerpt": content,
         }
+
+    def _prompt_friendly_evidence_item(self, item: Any) -> dict[str, Any]:
+        evidence = item if isinstance(item, dict) else item.model_dump()
+        return {
+            "index": int(evidence.get("index") or 0),
+            "origin": str(evidence.get("origin") or "").strip(),
+            "content": str(evidence.get("content") or "").strip(),
+            "aspects": list(evidence.get("aspects") or []),
+            "title": str(evidence.get("title") or "").strip(),
+            "url": str(evidence.get("url") or "").strip(),
+            "source": str(evidence.get("source") or "").strip(),
+            "score": evidence.get("score"),
+            "metadata": evidence.get("metadata") or {},
+        }
+
+    def _log_final_evidence_bundle(self, bundle: FinalEvidenceBundle) -> None:
+        log_progress(
+            "Final Evidence Bundle prepared: "
+            f"local={len(bundle.local_evidence)}, web={len(bundle.web_evidence)}, total={len(bundle.all_evidence)}"
+        )
+        for item in bundle.all_evidence:
+            log_progress(
+                "Final Evidence "
+                f"[{item.index}] title={item.title or item.source or 'untitled'}; "
+                f"url={item.url or '-'}; origin={item.origin}"
+            )
 
     def _truncate_text(self, text: str, max_chars: int) -> str:
         normalized = " ".join(str(text or "").split())

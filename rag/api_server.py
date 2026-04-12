@@ -59,48 +59,35 @@ def run_rag_task(task_id: str, question: str):
         agent_service = RagService()
         result = agent_service.run(query=question, thread_id=task_id)
 
-        timeline_cb("Agent 执行完成，正在提取答案和来源。")
+        timeline_cb("Agent 执行完成，正在提取结构化答案。")
 
-        messages = result.get("messages", [])
-        final_answer = ""
-        for msg in reversed(messages):
-            content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-            tool_calls = getattr(msg, "tool_calls", None) or (
-                msg.get("tool_calls") if isinstance(msg, dict) else None
-            )
-            if content and not tool_calls:
-                final_answer = content
-                break
+        final_evidence_items = [
+            dict(item)
+            for item in research_context.final_evidence_items
+            if isinstance(item, dict)
+        ]
+        structured_answer = agent_service.parse_final_response(
+            result,
+            final_evidence_items=final_evidence_items,
+        )
 
-        seen = set()
-        formatted_docs = []
-        for doc in research_context.final_evidence_items:
-            if not isinstance(doc, dict):
-                continue
+        evidence_lookup = {
+            int(item.get("index") or 0): item
+            for item in final_evidence_items
+            if int(item.get("index") or 0) > 0
+        }
+        referenced_evidence = [
+            evidence_lookup[index]
+            for index in structured_answer.evidence_list
+            if index in evidence_lookup
+        ]
 
-            source = doc.get("source") or doc.get("title") or doc.get("url") or "unknown"
-            dedupe_key = doc.get("url") or source
-            if dedupe_key in seen:
-                continue
-
-            formatted_docs.append(
-                {
-                    "content": str(doc.get("content", ""))[:300],
-                    "source": source,
-                    "title": doc.get("title", ""),
-                    "url": doc.get("url", ""),
-                    "aspects": doc.get("aspects", []) or [],
-                    "origin": doc.get("origin", ""),
-                }
-            )
-            seen.add(dedupe_key)
-
-        timeline_cb(f"提取到 {len(formatted_docs)} 个来源。")
+        timeline_cb(f"提取到 {len(referenced_evidence)} 条被引用证据。")
 
         tasks_db[task_id]["status"] = "completed"
         tasks_db[task_id]["result"] = {
-            "answer": final_answer or "Agent 未能生成有效答案",
-            "sources": formatted_docs,
+            "answer": structured_answer.answer or "Agent 未能生成有效答案",
+            "evidence_list": structured_answer.evidence_list,
         }
     except Exception as exc:
         tasks_db[task_id]["status"] = "failed"

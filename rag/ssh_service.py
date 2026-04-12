@@ -14,6 +14,15 @@ _TUNNEL_SERVERS: dict[str, Any] = {}
 _TUNNEL_BASE_URLS: dict[str, str] = {}
 _TUNNEL_CONFIGS: dict[str, tuple[Any, ...]] = {}
 
+DEFAULT_SHARED_SSH_CONFIG = {
+    "ssh_host": "172.26.19.131",
+    "ssh_port": 8888,
+    "ssh_username": "root",
+    "ssh_password": "123456.a",
+    "remote_host": "127.0.0.1",
+    "local_host": "127.0.0.1",
+}
+
 
 def _read_env(*names: str, default: str = "") -> str:
     for name in names:
@@ -66,15 +75,31 @@ def build_ssh_service_config(
     service_key = service_name.upper()
     ssh_prefix = f"RAG_{service_key}_SSH"
     return {
-        "ssh_host": _read_env(f"{ssh_prefix}_HOST", "RAG_SSH_HOST"),
-        "ssh_port": _read_int_env(f"{ssh_prefix}_PORT", "RAG_SSH_PORT", default=8888),
-        "ssh_username": _read_env(f"{ssh_prefix}_USERNAME", "RAG_SSH_USERNAME"),
-        "ssh_password": _read_env(f"{ssh_prefix}_PASSWORD", "RAG_SSH_PASSWORD"),
+        "ssh_host": _read_env(
+            f"{ssh_prefix}_HOST",
+            "RAG_SSH_HOST",
+            default=DEFAULT_SHARED_SSH_CONFIG["ssh_host"],
+        ),
+        "ssh_port": _read_int_env(
+            f"{ssh_prefix}_PORT",
+            "RAG_SSH_PORT",
+            default=int(DEFAULT_SHARED_SSH_CONFIG["ssh_port"]),
+        ),
+        "ssh_username": _read_env(
+            f"{ssh_prefix}_USERNAME",
+            "RAG_SSH_USERNAME",
+            default=DEFAULT_SHARED_SSH_CONFIG["ssh_username"],
+        ),
+        "ssh_password": _read_env(
+            f"{ssh_prefix}_PASSWORD",
+            "RAG_SSH_PASSWORD",
+            default=DEFAULT_SHARED_SSH_CONFIG["ssh_password"],
+        ),
         "remote_host": _read_env(
             f"{ssh_prefix}_REMOTE_HOST",
             f"RAG_{service_key}_REMOTE_HOST",
             "RAG_SSH_REMOTE_HOST",
-            default=default_remote_host,
+            default=default_remote_host or DEFAULT_SHARED_SSH_CONFIG["remote_host"],
         ),
         "remote_port": _read_int_env(
             f"{ssh_prefix}_REMOTE_PORT",
@@ -85,7 +110,7 @@ def build_ssh_service_config(
             f"{ssh_prefix}_LOCAL_HOST",
             f"RAG_{service_key}_LOCAL_HOST",
             "RAG_SSH_LOCAL_HOST",
-            default=default_local_host,
+            default=default_local_host or DEFAULT_SHARED_SSH_CONFIG["local_host"],
         ),
         "local_port": _read_int_env(
             f"{ssh_prefix}_LOCAL_PORT",
