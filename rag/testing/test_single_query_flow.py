@@ -521,7 +521,7 @@ class MiddlewarePromptBudgetTests(unittest.TestCase):
         self.assertNotIn(long_content, web_summary)
 
 
-class MiddlewareAutoWebSearchTests(unittest.TestCase):
+class MiddlewareAgentDrivenWebSearchTests(unittest.TestCase):
     def setUp(self):
         fake_json = """
         {
@@ -573,7 +573,7 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
             name="retrieve_local_kb",
         )
 
-    def test_retrieval_hook_auto_merges_web_evidence_when_search_is_needed(self):
+    def test_retrieval_hook_keeps_web_search_pending_when_search_is_needed(self):
         local_doc = NormalizedDocument(
             content="Local fading memory definition.",
             source="local.md",
@@ -592,31 +592,6 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
             aspects=["definition of fading memory in dynamic systems"],
             score=0.7,
             metadata=local_doc.metadata,
-        )
-        web_doc = NormalizedDocument(
-            content="Web evidence for HA-GNN historical access mechanism.",
-            source="web source",
-            score=0.9,
-            title="Web Paper",
-            url="https://example.com/web",
-            origin="tavily_web",
-            aspects=["HA-GNN historical access mechanism"],
-            metadata={"title": "Web Paper", "url": "https://example.com/web", "origin": "tavily_web"},
-        )
-        web_payload = WebSearchPayload(
-            status="success",
-            message="ok",
-            requested_missing_aspects=["HA-GNN historical access mechanism"],
-            covered_missing_aspects=["HA-GNN historical access mechanism"],
-            uncovered_missing_aspects=[],
-            search_queries=[
-                WebSearchQuery(
-                    aspect="HA-GNN historical access mechanism",
-                    query="HA-GNN historical access mechanism",
-                )
-            ],
-            results=[],
-            evidence_docs=[web_doc],
         )
         evaluation = mock.Mock(
             sufficient=False,
@@ -638,24 +613,19 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
         with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
             with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
                 with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
-                    with mock.patch.object(
-                        self.middleware,
-                        "_run_forced_web_search",
-                        return_value=web_payload,
-                    ) as mocked_search:
-                        result = self.middleware._handle_retrieval_result(
-                            request,
-                            self._make_retrieval_tool_message([local_doc]),
-                        )
+                    result = self.middleware._handle_retrieval_result(
+                        request,
+                        self._make_retrieval_tool_message([local_doc]),
+                    )
 
-        self.assertEqual(result.update["retrieval_next_action"], "answer")
-        self.assertFalse(result.update["web_search_required"])
-        self.assertTrue(result.update["web_search_used"])
-        self.assertEqual(result.update["relevance_missing_aspects"], [])
-        self.assertEqual(result.update["web_search_result"]["status"], "success")
-        self.assertEqual(len(result.update["final_evidence"]["web_evidence"]), 1)
-        self.assertEqual(result.update["final_evidence"]["web_evidence"][0]["origin"], "tavily_web")
-        mocked_search.assert_called_once_with(["HA-GNN historical access mechanism"])
+        self.assertEqual(result.update["retrieval_next_action"], "search_web")
+        self.assertTrue(result.update["web_search_required"])
+        self.assertFalse(result.update["web_search_used"])
+        self.assertEqual(result.update["relevance_missing_aspects"], ["HA-GNN historical access mechanism"])
+        self.assertIsNone(result.update["web_search_result"])
+        self.assertEqual(result.update["final_evidence"]["web_evidence"], [])
+        self.assertEqual(research_context.current_missing_aspects, ["HA-GNN historical access mechanism"])
+        self.assertEqual(len(result.update["final_evidence"]["local_evidence"]), 1)
 
     def test_retrieval_hook_skips_web_search_when_local_evidence_is_sufficient(self):
         local_doc = NormalizedDocument(
@@ -697,11 +667,10 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
         with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
             with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
                 with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
-                    with mock.patch.object(self.middleware, "_run_forced_web_search") as mocked_search:
-                        result = self.middleware._handle_retrieval_result(
-                            request,
-                            self._make_retrieval_tool_message([local_doc]),
-                        )
+                    result = self.middleware._handle_retrieval_result(
+                        request,
+                        self._make_retrieval_tool_message([local_doc]),
+                    )
 
         self.assertEqual(result.update["retrieval_next_action"], "answer")
         self.assertFalse(result.update["web_search_required"])
@@ -709,7 +678,6 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
         self.assertIsNone(result.update["web_search_result"])
         self.assertEqual(result.update["relevance_missing_aspects"], [])
         self.assertEqual(result.update["final_evidence"]["web_evidence"], [])
-        mocked_search.assert_not_called()
 
     def test_retrieval_hook_falls_back_to_weak_aspects_when_missing_aspects_is_empty(self):
         local_doc = NormalizedDocument(
@@ -731,21 +699,6 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
             score=0.55,
             metadata=local_doc.metadata,
         )
-        web_payload = WebSearchPayload(
-            status="success",
-            message="ok",
-            requested_missing_aspects=["HA-GNN historical access mechanism"],
-            covered_missing_aspects=["HA-GNN historical access mechanism"],
-            uncovered_missing_aspects=[],
-            search_queries=[
-                WebSearchQuery(
-                    aspect="HA-GNN historical access mechanism",
-                    query="HA-GNN historical access mechanism",
-                )
-            ],
-            results=[],
-            evidence_docs=[],
-        )
         evaluation = mock.Mock(
             sufficient=False,
             reason="support is weak",
@@ -766,19 +719,80 @@ class MiddlewareAutoWebSearchTests(unittest.TestCase):
         with mock.patch.object(agent_middleware_module, "evaluate_retrieval", return_value=evaluation):
             with mock.patch.object(agent_middleware_module, "annotate_local_documents", return_value=[local_doc]):
                 with mock.patch.object(agent_middleware_module, "select_local_evidence", return_value=[local_item]):
-                    with mock.patch.object(
-                        self.middleware,
-                        "_run_forced_web_search",
-                        return_value=web_payload,
-                    ) as mocked_search:
-                        result = self.middleware._handle_retrieval_result(
-                            request,
-                            self._make_retrieval_tool_message([local_doc]),
-                        )
+                    result = self.middleware._handle_retrieval_result(
+                        request,
+                        self._make_retrieval_tool_message([local_doc]),
+                    )
 
-        self.assertEqual(result.update["retrieval_next_action"], "answer")
-        self.assertEqual(result.update["relevance_missing_aspects"], [])
-        mocked_search.assert_called_once_with(["HA-GNN historical access mechanism"])
+        self.assertEqual(result.update["retrieval_next_action"], "search_web")
+        self.assertTrue(result.update["web_search_required"])
+        self.assertFalse(result.update["web_search_used"])
+        self.assertEqual(result.update["relevance_missing_aspects"], ["HA-GNN historical access mechanism"])
+        self.assertIsNone(result.update["web_search_result"])
+
+    def test_web_search_hook_merges_web_evidence_and_unlocks_answering(self):
+        local_item = FinalEvidenceItem(
+            index=1,
+            origin="local_kb",
+            content="Local fading memory definition.",
+            source="local.md",
+            title="Local Paper",
+            url="https://example.com/local",
+            aspects=["definition of fading memory in dynamic systems"],
+            score=0.7,
+            metadata={"index": 1, "origin": "local_kb", "title": "Local Paper", "url": "https://example.com/local"},
+        )
+        web_doc = NormalizedDocument(
+            content="Web evidence for HA-GNN historical access mechanism.",
+            source="web source",
+            score=0.9,
+            title="Web Paper",
+            url="https://example.com/web",
+            origin="tavily_web",
+            aspects=["HA-GNN historical access mechanism"],
+            metadata={"title": "Web Paper", "url": "https://example.com/web", "origin": "tavily_web"},
+        )
+        web_payload = WebSearchPayload(
+            status="success",
+            message="ok",
+            requested_missing_aspects=["HA-GNN historical access mechanism"],
+            covered_missing_aspects=["HA-GNN historical access mechanism"],
+            uncovered_missing_aspects=[],
+            search_queries=[
+                WebSearchQuery(
+                    aspect="HA-GNN historical access mechanism",
+                    query="HA-GNN historical access mechanism",
+                )
+            ],
+            results=[],
+            evidence_docs=[web_doc],
+        )
+        request = mock.Mock()
+        request.state = {
+            "final_evidence": build_final_evidence_bundle(
+                query=self.plan.original_query,
+                local_evidence=[local_item],
+                web_evidence=[],
+                uncovered_aspects=["HA-GNN historical access mechanism"],
+                note="web search is required before final answering",
+            ).model_dump(),
+        }
+        request.tool_call = {"name": "search_web_with_tavily"}
+        result = ToolMessage(
+            content=web_payload.model_dump_json(),
+            tool_call_id="call_web_1",
+            name="search_web_with_tavily",
+        )
+
+        command = self.middleware._handle_web_search_result(request, result)
+
+        self.assertTrue(command.update["web_search_used"])
+        self.assertFalse(command.update["web_search_required"])
+        self.assertEqual(command.update["retrieval_next_action"], "answer")
+        self.assertEqual(command.update["relevance_missing_aspects"], [])
+        self.assertEqual(command.update["web_search_result"]["status"], "success")
+        self.assertEqual(len(command.update["final_evidence"]["web_evidence"]), 1)
+        self.assertEqual(command.update["final_evidence"]["web_evidence"][0]["origin"], "tavily_web")
 
 
 class RetrievalEvaluationTests(unittest.TestCase):
@@ -856,7 +870,7 @@ class RetrievalEvaluationTests(unittest.TestCase):
             },
         ]
         result = evaluate_retrieval(plan, docs)
-        self.assertIn("advantages of Transformer over RNN", result.covered_aspects)
+        self.assertIn("advantages of Transformer over RNN", result.weak_aspects)
         self.assertLess(result.support_strength, 0.60)
         self.assertFalse(result.sufficient)
 
@@ -1540,13 +1554,23 @@ class MiddlewareFilteringTests(unittest.TestCase):
         self.middleware = AcademicResearchMiddleware(
             FakeLLM(fake_json),
             retrieve_tool_name="retrieve_local_kb",
-            crawl_tool_name="crawl_academic_sources",
+            web_search_tool_name="search_web_with_tavily",
         )
-        self.tools = [MiddlewareTool("retrieve_local_kb"), MiddlewareTool("crawl_academic_sources")]
+        self.query_plan = AcademicQueryPlan(
+            original_query="How to optimize academic RAG retrieval?",
+            normalized_query_zh="如何优化学术 RAG 检索？",
+            retrieval_query_zh="学术 RAG 检索 查询优化",
+            retrieval_query_en="academic RAG retrieval query optimization",
+            crawler_query_en="academic RAG retrieval query optimization",
+            keywords_zh=["学术RAG", "检索", "查询优化"],
+            keywords_en=["academic RAG", "retrieval", "query optimization"],
+            required_aspects=["RAG definition", "retrieval workflow"],
+        )
+        self.tools = [MiddlewareTool("retrieve_local_kb"), MiddlewareTool("search_web_with_tavily")]
 
     def test_wrap_model_call_initially_only_exposes_retriever(self):
         request = DummyRequest(
-            state={"query_plan": {}, "messages": []},
+            state={"query_plan": self.query_plan.model_dump(), "messages": []},
             tools=self.tools,
             system_message=SystemMessage(content="base"),
         )
@@ -1557,16 +1581,15 @@ class MiddlewareFilteringTests(unittest.TestCase):
         result = self.middleware.wrap_model_call(request, handler)
         self.assertEqual([tool.name for tool in result.tools], ["retrieve_local_kb"])
 
-    def test_wrap_model_call_allows_retrieve_more_once(self):
+    def test_wrap_model_call_exposes_only_web_search_when_required(self):
         request = DummyRequest(
             state={
-                "query_plan": {},
+                "query_plan": self.query_plan.model_dump(),
                 "retrieval_result": {"status": "success"},
                 "retrieval_sufficient": False,
-                "retrieval_next_action": "retrieve_more",
-                "retrieval_retry_count": 0,
-                "crawl_required": False,
-                "crawl_used": False,
+                "retrieval_next_action": "search_web",
+                "web_search_required": True,
+                "web_search_used": False,
                 "messages": [],
             },
             tools=self.tools,
@@ -1577,18 +1600,19 @@ class MiddlewareFilteringTests(unittest.TestCase):
             return inner_request
 
         result = self.middleware.wrap_model_call(request, handler)
-        self.assertEqual([tool.name for tool in result.tools], ["retrieve_local_kb"])
+        self.assertEqual([tool.name for tool in result.tools], ["search_web_with_tavily"])
+        self.assertIn("must call `search_web_with_tavily`", str(result.system_message.content))
+        self.assertIn("do not provide a partial or final answer", str(result.system_message.content))
 
-    def test_wrap_model_call_enables_crawler_when_needed(self):
+    def test_wrap_model_call_hides_tools_after_web_search(self):
         request = DummyRequest(
             state={
-                "query_plan": {},
+                "query_plan": self.query_plan.model_dump(),
                 "retrieval_result": {"status": "success"},
                 "retrieval_sufficient": False,
-                "retrieval_next_action": "crawl_more",
-                "retrieval_retry_count": 1,
-                "crawl_required": True,
-                "crawl_used": False,
+                "retrieval_next_action": "answer",
+                "web_search_required": False,
+                "web_search_used": True,
                 "messages": [],
             },
             tools=self.tools,
@@ -1599,7 +1623,7 @@ class MiddlewareFilteringTests(unittest.TestCase):
             return inner_request
 
         result = self.middleware.wrap_model_call(request, handler)
-        self.assertEqual([tool.name for tool in result.tools], ["crawl_academic_sources"])
+        self.assertEqual([tool.name for tool in result.tools], [])
 
 
 class HybridRetrievalTests(unittest.TestCase):

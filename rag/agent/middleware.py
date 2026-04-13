@@ -26,7 +26,6 @@ try:
         select_local_evidence,
     )
     from .runtime import context, log_progress
-    from .tools_impl import search_web_with_tavily
 except ImportError:
     from query.optimizer import AcademicQueryPlanner
     from retrieval.evaluator import evaluate_retrieval
@@ -44,7 +43,6 @@ except ImportError:
         select_local_evidence,
     )
     from agent.runtime import context, log_progress
-    from agent.tools_impl import search_web_with_tavily
 
 
 class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
@@ -70,7 +68,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         context.original_query = original_query
         context.query_plan = plan.model_dump()
         context.set_current_missing_aspects([])
-        log_progress("查询预处理完成，已生成学术检索计划。")
+        log_progress("Query planning finished. Academic retrieval plan is ready.")
         return {
             "query_plan": plan.model_dump(),
             "retrieval_result": None,
@@ -154,23 +152,6 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             payload = payload.model_copy(update={"docs": annotated_docs})
 
             local_evidence = select_local_evidence(annotated_docs)
-            final_bundle = build_final_evidence_bundle(
-                query=query_plan.original_query,
-                local_evidence=local_evidence,
-                web_evidence=[],
-                uncovered_aspects=[] if evaluation.sufficient else evaluation.missing_aspects,
-                note=(
-                    "local evidence is sufficient for answering"
-                    if evaluation.sufficient
-                    else "web search is required for the remaining missing aspects"
-                ),
-            )
-
-            relevance_reason = evaluation.reason
-            web_search_payload = None
-            web_search_used = False
-            web_search_required = not evaluation.sufficient
-            retrieval_next_action = "answer" if evaluation.sufficient else "search_web"
             search_aspects = (
                 []
                 if evaluation.sufficient
@@ -181,34 +162,28 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 )
             )
             remaining_missing_aspects = list(search_aspects)
+            final_bundle = build_final_evidence_bundle(
+                query=query_plan.original_query,
+                local_evidence=local_evidence,
+                web_evidence=[],
+                uncovered_aspects=remaining_missing_aspects,
+                note=(
+                    "local evidence is sufficient for answering"
+                    if evaluation.sufficient
+                    else "web search is required before final answering"
+                ),
+            )
 
+            relevance_reason = evaluation.reason
             if not evaluation.sufficient:
                 relevance_reason = f"{relevance_reason}; next_action=search_web"
-                web_search_payload = self._run_forced_web_search(search_aspects)
-                if web_search_payload is not None:
-                    web_search_used = True
-                    web_search_required = False
-                    retrieval_next_action = "answer"
-                    remaining_missing_aspects = list(web_search_payload.uncovered_missing_aspects)
-                    web_evidence = [
-                        normalized_doc_to_final_evidence_item(doc, default_origin="tavily_web")
-                        for doc in web_search_payload.evidence_docs
-                    ]
-                    final_bundle = build_final_evidence_bundle(
-                        query=query_plan.original_query,
-                        local_evidence=local_evidence,
-                        web_evidence=web_evidence,
-                        uncovered_aspects=remaining_missing_aspects,
-                        note=(
-                            "local evidence and Tavily web evidence have been merged for final answering"
-                            if web_evidence
-                            else "web search was required but returned no mergeable web evidence"
-                        ),
-                    )
+
+            retrieval_next_action = "answer" if evaluation.sufficient else "search_web"
+            web_search_required = not evaluation.sufficient
+            web_search_used = False
 
             context.retrieval_result = payload.model_dump()
-            if web_search_payload is not None:
-                context.set_web_search_result(web_search_payload.model_dump())
+            context.set_web_search_result(None)
             context.set_current_missing_aspects(remaining_missing_aspects)
             self._log_final_evidence_bundle(final_bundle)
             context.set_final_evidence(final_bundle.model_dump())
@@ -225,8 +200,8 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 status=result.status,
             )
             log_progress(
-                "本地检索相关性评估完成："
-                f"sufficient={evaluation.sufficient}, next_action={'answer' if evaluation.sufficient else 'search_web'}"
+                "Local retrieval evaluation finished: "
+                f"sufficient={evaluation.sufficient}, next_action={retrieval_next_action}"
             )
             return Command(
                 update={
@@ -242,42 +217,20 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                     "relevance_weak_aspects": evaluation.weak_aspects,
                     "web_search_required": web_search_required,
                     "web_search_used": web_search_used,
-                    "web_search_result": (
-                        web_search_payload.model_dump() if web_search_payload is not None else None
-                    ),
+                    "web_search_result": None,
                     "final_evidence": final_bundle.model_dump(),
                     "messages": [updated_message],
                 }
             )
         except Exception as exc:
-            log_progress(f"检索结果 hook 解析失败，保留原始结果继续执行: {exc}")
+            log_progress(f"Failed to parse retrieval hook result; preserving raw tool output: {exc}")
             return result
-
-    def _run_forced_web_search(self, missing_aspects: list[str]) -> WebSearchPayload | None:
-        requested_missing_aspects = [str(item or "").strip() for item in missing_aspects if str(item or "").strip()]
-        if not requested_missing_aspects:
-            return None
-
-        try:
-            log_progress(
-                "Auto-running Tavily search because local evidence is insufficient: "
-                f"{requested_missing_aspects}"
-            )
-            raw_payload = search_web_with_tavily.invoke({"missing_aspects": requested_missing_aspects})
-            payload = WebSearchPayload(**json.loads(str(raw_payload)))
-            if payload.evidence_docs:
-                log_progress("Tavily search finished and web evidence has been merged before answering.")
-            else:
-                log_progress("Tavily search finished but returned no mergeable web evidence.")
-            return payload
-        except Exception as exc:
-            log_progress(f"Automatic Tavily search failed; continue with current evidence only: {exc}")
-            return None
 
     def _handle_web_search_result(self, request: ToolCallRequest, result: ToolMessage) -> Command | ToolMessage:
         try:
             payload = WebSearchPayload(**json.loads(str(result.content)))
             context.set_web_search_result(payload.model_dump())
+            context.set_current_missing_aspects(list(payload.uncovered_missing_aspects))
 
             local_evidence = []
             final_evidence_raw = request.state.get("final_evidence") or {}
@@ -308,19 +261,20 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
                 name=result.name,
                 status=result.status,
             )
-            log_progress("Tavily 搜索阶段完成，开始基于统一证据生成最终答案。")
+            log_progress("Web search finished. The agent can now answer from the merged evidence bundle.")
             return Command(
                 update={
                     "web_search_used": True,
                     "web_search_required": False,
                     "web_search_result": payload.model_dump(),
+                    "relevance_missing_aspects": list(payload.uncovered_missing_aspects),
                     "retrieval_next_action": "answer",
                     "final_evidence": final_bundle.model_dump(),
                     "messages": [updated_message],
                 }
             )
         except Exception as exc:
-            log_progress(f"网页搜索结果 hook 解析失败，保留原始结果继续执行: {exc}")
+            log_progress(f"Failed to parse web-search hook result; preserving raw tool output: {exc}")
             return result
 
     def _filter_tools(
@@ -412,19 +366,26 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
         final_evidence_raw: dict[str, Any] | None,
     ) -> str:
         if query_plan is None:
-            return "当前尚未注入查询计划。"
+            return "No academic query plan is available yet."
 
         if retrieval_sufficient is None:
-            stage_hint = "下一步必须调用 `retrieve_local_kb`，参数使用 retrieval_query_zh。"
+            stage_hint = (
+                "You must call `retrieve_local_kb` next, using `retrieval_query_zh` as the tool input."
+            )
         elif retrieval_sufficient:
-            stage_hint = "本地证据已经足够，禁止继续调用工具，直接基于 Final Evidence Bundle 回答。"
+            stage_hint = (
+                "Local evidence is already sufficient. Do not call any more tools; answer directly from the Final Evidence Bundle."
+            )
         elif retrieval_next_action == "search_web":
-            stage_hint = "本地证据不足，下一步必须调用 `search_web_with_tavily`，参数直接使用当前 missing_aspects 列表。"
+            stage_hint = (
+                "Local evidence is insufficient. You must call `search_web_with_tavily` next using the current `missing_aspects` list exactly as the tool input. "
+                "When `web_search_used=false`, do not provide a partial or final answer before this search."
+            )
         else:
-            stage_hint = "如果 Final Evidence Bundle 已存在，请直接基于它回答。"
+            stage_hint = "If a Final Evidence Bundle is already present, answer directly from it."
 
         metrics_text = (
-            "尚未评估"
+            "not_evaluated"
             if aspect_coverage is None or support_strength is None or noise_ratio is None
             else (
                 f"aspect_coverage={aspect_coverage:.2f}, "
@@ -433,7 +394,7 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             )
         )
 
-        final_evidence_text = "尚未生成"
+        final_evidence_text = "not_generated"
         if final_evidence_raw:
             try:
                 final_evidence = FinalEvidenceBundle(**final_evidence_raw)
@@ -453,15 +414,16 @@ class AcademicResearchMiddleware(AgentMiddleware[ResearchState, Any]):
             f"- retrieval_next_action: {retrieval_next_action or 'pending'}\n"
             f"- evaluation_metrics: {metrics_text}\n"
             f"- missing_aspects: {missing_aspects}\n"
-            f"- relevance_reason: {relevance_reason or '尚未评估'}\n"
+            f"- relevance_reason: {relevance_reason or 'not_evaluated'}\n"
             f"- workflow_constraint: {stage_hint}\n"
             "## Final Evidence Bundle\n"
             f"{final_evidence_text}\n"
-           "Final answers must prioritize the Final Evidence Bundle.\n"
-           "Each piece of evidence has already been normalized and includes index / origin / content / aspects / title / url / source.\n"
-           "The index is the only valid citation identifier within this response. You may read title, url, and origin to understand the evidence, but do not explicitly include them in the final output.\n"
+            "Final answers must prioritize the Final Evidence Bundle.\n"
+            "Each piece of evidence has already been normalized and includes index / origin / content / aspects / title / url / source.\n"
+            "The index is the only valid citation identifier within this response. You may read title, url, and origin to understand the evidence, but do not explicitly include them in the final output.\n"
             "The final output must be a JSON object containing exactly two fields: answer and evidence_list.\n"
             "The answer must be in Chinese and should be organized primarily by aspect; do not use phrases such as \"local knowledge base\", \"web search\", \"Tavily\", or \"source type\".\n"
+            "If retrieval_next_action is search_web and web_search_used is false, you must call search_web_with_tavily exactly once with the current missing_aspects before answering.\n"
             "If a sentence or paragraph uses a piece of evidence, append the corresponding [index] at the end of that sentence or paragraph; if a conclusion is supported by multiple pieces of evidence, cite them as [1][3].\n"
             "Only cite indexes that exist in the Final Evidence Bundle; do not fabricate citations; if uncovered_aspects is non-empty, ignore the uncovered parts and do not explicitly elaborate on them.\n"
             "The evidence_list must include only the indexes that are actually cited in the answer. Do not output Markdown code blocks, and do not include any additional explanations."
