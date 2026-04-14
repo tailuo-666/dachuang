@@ -4,6 +4,7 @@ import glob
 import json
 import os
 import re
+import shutil
 from collections import defaultdict
 from typing import Any
 
@@ -297,6 +298,33 @@ class RAGSystem:
             )
         except Exception as exc:
             print(f"Failed to load FAISS, index will need rebuilding: {exc}")
+
+    def rebuild_from_documents(self, documents):
+        """Rebuild the FAISS index directly from retained chunk documents."""
+        if self.embeddings is None:
+            self.setup_embeddings()
+
+        faiss_path = "./faiss"
+        if not documents:
+            if os.path.exists(faiss_path):
+                shutil.rmtree(faiss_path, ignore_errors=True)
+            self.vectorstore = None
+            self.retriever = None
+            print("FAISS index cleared because no documents remain.")
+            return True
+
+        try:
+            from langchain_community.vectorstores import FAISS
+
+            vectorstore = FAISS.from_documents(documents, self.embeddings)
+            vectorstore.save_local(faiss_path)
+            self.vectorstore = vectorstore
+            self.retriever = self.setup_fallback_retriever(k=FINAL_TOP_K)
+            print(f"FAISS index rebuilt from {len(documents)} retained chunks.")
+            return self.retriever is not None
+        except Exception as exc:
+            print(f"Failed to rebuild FAISS from retained chunks: {exc}")
+            return False
 
     def _is_academic_content(self, text):
         """Filter obvious noise blocks before indexing."""

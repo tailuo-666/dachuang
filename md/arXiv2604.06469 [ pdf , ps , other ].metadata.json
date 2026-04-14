@@ -1,7 +1,12 @@
 {
+  "paper_id": 2,
   "title": "arXiv:2604.06469 [ pdf , ps , other ]",
   "url": "https://arxiv.org/pdf/2604.06469",
   "pdf_link": "https://arxiv.org/pdf/2604.06469",
   "source_file": "arXiv2604.06469 [ pdf , ps , other ].pdf",
-  "origin": "local_kb"
+  "origin": "local_kb",
+  "time": "2026-04-10 10:48:59",
+  "size": 1049413,
+  "pages": 8,
+  "stored_pdf_path": "paper_results\\arXiv2604.06469 [ pdf , ps , other ].pdf"
 }

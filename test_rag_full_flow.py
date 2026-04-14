@@ -220,6 +220,53 @@ def collect_runtime_env_snapshot() -> dict[str, Any]:
     }
 
 
+def to_jsonable(value: Any) -> Any:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): to_jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [to_jsonable(item) for item in value]
+
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            return to_jsonable(model_dump())
+        except Exception:
+            pass
+
+    if hasattr(value, "content"):
+        message_payload = {
+            "message_type": type(value).__name__,
+            "content": to_jsonable(getattr(value, "content", "")),
+        }
+        for attr_name in (
+            "type",
+            "name",
+            "id",
+            "tool_calls",
+            "invalid_tool_calls",
+            "additional_kwargs",
+            "response_metadata",
+            "artifact",
+            "status",
+        ):
+            attr_value = getattr(value, attr_name, None)
+            if attr_value not in (None, [], {}, ""):
+                message_payload[attr_name] = to_jsonable(attr_value)
+        return message_payload
+
+    raw_dict = getattr(value, "__dict__", None)
+    if isinstance(raw_dict, dict) and raw_dict:
+        payload = {"object_type": type(value).__name__}
+        payload.update({str(key): to_jsonable(item) for key, item in raw_dict.items()})
+        return payload
+
+    return repr(value)
+
+
 def run_full_flow(query: str) -> dict[str, Any]:
     from rag.agent.builder import RagService
     from rag.agent.runtime import context, init_runtime
@@ -230,9 +277,12 @@ def run_full_flow(query: str) -> dict[str, Any]:
     if rag_system is None:
         artifact_check = check_local_rag_artifacts()
         return {
-            "ok": False,
-            "error": "RAGSystem initialization failed. Check ./faiss, ./md, and embedding config.",
-            "artifact_check": artifact_check,
+            "raw_invoke_result": None,
+            "processed_result": {
+                "ok": False,
+                "error": "RAGSystem initialization failed. Check ./faiss, ./md, and embedding config.",
+                "artifact_check": artifact_check,
+            },
         }
 
     init_runtime(
@@ -244,6 +294,7 @@ def run_full_flow(query: str) -> dict[str, Any]:
 
     service = RagService()
     result = service.run(query=query)
+    raw_invoke_result = to_jsonable(result)
     final_evidence = context.final_evidence or {}
     final_items = [
         dict(item)
@@ -275,19 +326,22 @@ def run_full_flow(query: str) -> dict[str, Any]:
     ]
 
     return {
-        "ok": bool(answer),
-        "answer": answer,
-        "answer_preview": build_answer_preview(answer),
-        "evidence_list": structured_answer.evidence_list,
-        "retrieval_next_action": result.get("retrieval_next_action"),
-        "relevance_reason": result.get("relevance_reason"),
-        "relevance_missing_aspects": result.get("relevance_missing_aspects"),
-        "missing_aspects_for_crawler": missing_aspects,
-        "web_search_status": web_search_result.get("status"),
-        "web_search_message": web_search_result.get("message", ""),
-        "final_evidence_summary": final_evidence.get("summary", ""),
-        "final_evidence_item_count": len(final_items),
-        "referenced_evidence": referenced_evidence,
+        "raw_invoke_result": raw_invoke_result,
+        "processed_result": {
+            "ok": bool(answer),
+            "answer": answer,
+            "answer_preview": build_answer_preview(answer),
+            "evidence_list": structured_answer.evidence_list,
+            "retrieval_next_action": result.get("retrieval_next_action"),
+            "relevance_reason": result.get("relevance_reason"),
+            "relevance_missing_aspects": result.get("relevance_missing_aspects"),
+            "missing_aspects_for_crawler": missing_aspects,
+            "web_search_status": web_search_result.get("status"),
+            "web_search_message": web_search_result.get("message", ""),
+            "final_evidence_summary": final_evidence.get("summary", ""),
+            "final_evidence_item_count": len(final_items),
+            "referenced_evidence": referenced_evidence,
+        },
     }
 
 
@@ -390,9 +444,13 @@ def main() -> int:
     print_step("5) Full RAG flow")
     try:
         rag_result = run_full_flow(args.query)
-        print(json.dumps(rag_result, ensure_ascii=False, indent=2))
-        report["full_flow"] = rag_result
-        if not rag_result.get("ok"):
+        print_step("5a) Raw agent.invoke result")
+        print(json.dumps(rag_result.get("raw_invoke_result"), ensure_ascii=False, indent=2))
+        print_step("5b) Post-processed full-flow JSON")
+        print(json.dumps(rag_result.get("processed_result"), ensure_ascii=False, indent=2))
+        report["full_flow_raw_invoke"] = rag_result.get("raw_invoke_result")
+        report["full_flow"] = rag_result.get("processed_result")
+        if not (rag_result.get("processed_result") or {}).get("ok"):
             overall_ok = False
     except Exception as exc:
         overall_ok = False

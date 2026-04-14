@@ -1,7 +1,12 @@
 {
+  "paper_id": 1,
   "title": "arXiv:2603.23814 [ pdf , ps , other ]",
   "url": "https://arxiv.org/pdf/2603.23814",
   "pdf_link": "https://arxiv.org/pdf/2603.23814",
   "source_file": "arXiv2603.23814 [ pdf , ps , other ].pdf",
-  "origin": "local_kb"
+  "origin": "local_kb",
+  "time": "2026-04-10 10:48:36",
+  "size": 343741,
+  "pages": 13,
+  "stored_pdf_path": "paper_results\\arXiv2603.23814 [ pdf , ps , other ].pdf"
 }

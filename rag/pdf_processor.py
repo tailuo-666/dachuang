@@ -72,7 +72,12 @@ class PDFProcessor:
     def _safe_metadata_value(self, value: Any) -> str:
         return str(value or "").strip()
 
-    def _load_json_metadata(self, path: str) -> dict[str, str]:
+    def _safe_metadata_scalar(self, value: Any) -> Any:
+        if isinstance(value, (str, int, float, bool)) or value is None:
+            return value
+        return str(value)
+
+    def _load_json_metadata(self, path: str) -> dict[str, Any]:
         if not os.path.exists(path):
             return {}
         try:
@@ -83,7 +88,7 @@ class PDFProcessor:
             return {}
         if not isinstance(payload, dict):
             return {}
-        return {str(key): self._safe_metadata_value(value) for key, value in payload.items()}
+        return {str(key): self._safe_metadata_scalar(value) for key, value in payload.items()}
 
     def _load_manifest_index(self, folder: str) -> dict[str, dict[str, str]]:
         folder_key = os.path.abspath(folder)
@@ -129,7 +134,13 @@ class PDFProcessor:
                 return dict(manifest_index[lookup_key])
         return {}
 
-    def _normalize_pdf_metadata(self, pdf_path: str, doc: fitz.Document | None = None) -> dict[str, str]:
+    def _normalize_pdf_metadata(
+        self,
+        pdf_path: str,
+        doc: fitz.Document | None = None,
+        *,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         sidecar = self._load_json_metadata(self._metadata_sidecar_path(pdf_path))
         manifest = self._resolve_manifest_metadata(pdf_path)
 
@@ -149,13 +160,16 @@ class PDFProcessor:
         pdf_link = sidecar.get("pdf_link") or manifest.get("pdf_link") or sidecar.get("url") or ""
         url = sidecar.get("url") or pdf_link
 
-        return {
+        metadata: dict[str, Any] = {
             "title": self._safe_metadata_value(title),
             "url": self._safe_metadata_value(url),
             "pdf_link": self._safe_metadata_value(pdf_link or url),
             "source_file": os.path.basename(pdf_path),
             "origin": "local_kb",
         }
+        if isinstance(extra_metadata, dict):
+            metadata.update(extra_metadata)
+        return metadata
 
     def _write_md_metadata(self, out_md: str, metadata: dict[str, Any]) -> None:
         payload = {
@@ -165,6 +179,29 @@ class PDFProcessor:
             "source_file": self._safe_metadata_value(metadata.get("source_file")),
             "origin": self._safe_metadata_value(metadata.get("origin") or "local_kb"),
         }
+        if metadata.get("paper_id") is not None:
+            try:
+                payload["paper_id"] = int(metadata.get("paper_id"))
+            except (TypeError, ValueError):
+                pass
+        if metadata.get("size") is not None:
+            try:
+                payload["size"] = int(metadata.get("size"))
+            except (TypeError, ValueError):
+                pass
+        if metadata.get("pages") is not None:
+            try:
+                payload["pages"] = int(metadata.get("pages"))
+            except (TypeError, ValueError):
+                pass
+        if metadata.get("time") is not None:
+            payload["time"] = self._safe_metadata_value(metadata.get("time"))
+        if metadata.get("stored_pdf_path") is not None:
+            payload["stored_pdf_path"] = self._safe_metadata_value(metadata.get("stored_pdf_path"))
+        for key, value in metadata.items():
+            if key in payload:
+                continue
+            payload[str(key)] = self._safe_metadata_scalar(value)
         with open(self._metadata_sidecar_path(out_md), "w", encoding="utf-8") as file:
             json.dump(payload, file, ensure_ascii=False, indent=2)
 
@@ -363,9 +400,15 @@ class PDFProcessor:
             trimmed_pages.pop()
         return trimmed_pages
 
-    def _pdf_to_text(self, pdf_path: str, out_md: str) -> dict[str, Any]:
+    def _pdf_to_text(
+        self,
+        pdf_path: str,
+        out_md: str,
+        *,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         doc = fitz.open(pdf_path)
-        doc_metadata = self._normalize_pdf_metadata(pdf_path, doc)
+        doc_metadata = self._normalize_pdf_metadata(pdf_path, doc, extra_metadata=extra_metadata)
         page_count = doc.page_count
         page_lines: list[list[str]] = []
 
@@ -392,14 +435,20 @@ class PDFProcessor:
             "nonempty_pages": sum(1 for page_text in cleaned_pages if page_text.strip()),
         }
 
-    def process_pdf(self, pdf_path: str, out_md: str | None = None) -> dict[str, Any]:
+    def process_pdf(
+        self,
+        pdf_path: str,
+        out_md: str | None = None,
+        *,
+        extra_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         if not os.path.exists(pdf_path):
             raise FileNotFoundError(f"PDF file does not exist: {pdf_path}")
         target_md = out_md or os.path.join(
             self.output_dir,
             os.path.splitext(os.path.basename(pdf_path))[0] + ".md",
         )
-        return self._pdf_to_text(pdf_path, target_md)
+        return self._pdf_to_text(pdf_path, target_md, extra_metadata=extra_metadata)
 
     def process_pdf_folder(self, pdf_folder_path: str) -> list[str]:
         if not os.path.exists(pdf_folder_path):
