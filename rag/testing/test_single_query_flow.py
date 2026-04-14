@@ -23,6 +23,7 @@ try:
     import rag.agent.middleware as agent_middleware_module
     from rag.agent.runtime import context as research_context
     import rag.llm_factory as llm_factory_module
+    import rag.llm_service as llm_service_module
     import rag.rag_system as rag_system_module
     from rag.crawlers.arxiv import ArxivCrawlerIntegrated
     from rag.crawlers.standalone import (
@@ -52,6 +53,7 @@ except ImportError:
     import agent.middleware as agent_middleware_module
     from agent.runtime import context as research_context
     import llm_factory as llm_factory_module
+    import llm_service as llm_service_module
     import rag_system as rag_system_module
     from crawlers.arxiv import ArxivCrawlerIntegrated
     from crawlers.standalone import (
@@ -324,6 +326,128 @@ class StandaloneRuntimeConfigTests(unittest.TestCase):
             self.assertEqual(ocr_ssh_config["remote_port"], 8002)
             self.assertEqual(embedding_ssh_config["ssh_host"], "172.26.19.131")
             self.assertEqual(embedding_ssh_config["remote_port"], 8000)
+
+
+class LLMServiceCompatibilityTests(unittest.TestCase):
+    def tearDown(self):
+        llm_service_module.reset_default_llm_service()
+
+    def test_get_default_llm_config_reads_environment_temperature(self):
+        with mock.patch.dict(
+            os.environ,
+            {
+                "RAG_LLM_MODEL": "env-model",
+                "RAG_LLM_API_KEY": "env-key",
+                "RAG_LLM_BASE_URL": "http://env-server/v1",
+                "RAG_LLM_TEMPERATURE": "0.33",
+            },
+            clear=False,
+        ):
+            config = llm_factory_module.get_default_llm_config()
+
+        self.assertEqual(config["model"], "env-model")
+        self.assertEqual(config["api_key"], "env-key")
+        self.assertEqual(config["base_url"], "http://env-server/v1")
+        self.assertEqual(config["temperature"], 0.33)
+
+    def test_create_default_llm_prefers_runtime_service_override(self):
+        remote_config = {
+            "scheme": "http",
+            "host": "127.0.0.1",
+            "port": 8001,
+            "model": "remote-model",
+            "api_key": "EMPTY",
+            "base_url": "http://remote-server/v1",
+            "temperature": 0.1,
+            "ssh": {},
+        }
+        llm_service = llm_service_module.LLMConfigService(
+            default_config_loader=lambda: dict(remote_config),
+            remote_config_loader=lambda: dict(remote_config),
+            llm_builder=lambda **kwargs: kwargs,
+            model_fetcher=lambda base_url, api_key, timeout: ["remote-model"]
+            if base_url == "http://remote-server/v1"
+            else ["api-model"],
+        )
+        llm_service_module.set_default_llm_service(llm_service)
+
+        switched = llm_service.switch_to_api(
+            api_key="sk-demo",
+            base_url="https://example.com/v1",
+            model="api-model",
+            temperature=0.67,
+        )
+        llm = llm_factory_module.create_default_llm()
+
+        self.assertTrue(switched)
+        self.assertEqual(llm["api_key"], "sk-demo")
+        self.assertEqual(llm["base_url"], "https://example.com/v1")
+        self.assertEqual(llm["model"], "api-model")
+        self.assertEqual(llm["temperature"], 0.67)
+
+    def test_create_default_llm_prefers_runtime_remote_override_without_api_key(self):
+        observed_requests: list[tuple[str, str]] = []
+
+        def model_fetcher(base_url, api_key, timeout):
+            observed_requests.append((base_url, api_key))
+            if base_url == "https://ssh-style.example.com/v1" and api_key == "EMPTY":
+                return ["ssh-style-model"]
+            return []
+
+        remote_config = {
+            "scheme": "http",
+            "host": "127.0.0.1",
+            "port": 8001,
+            "model": "remote-model",
+            "api_key": "EMPTY",
+            "base_url": "http://remote-server/v1",
+            "temperature": 0.1,
+            "ssh": {},
+        }
+        llm_service = llm_service_module.LLMConfigService(
+            default_config_loader=lambda: {
+                **dict(remote_config),
+                "api_key": "env-key-should-not-win",
+            },
+            remote_config_loader=lambda: dict(remote_config),
+            llm_builder=lambda **kwargs: kwargs,
+            model_fetcher=model_fetcher,
+        )
+        llm_service_module.set_default_llm_service(llm_service)
+
+        switched = llm_service.switch_to_remote(
+            0.42,
+            base_url="https://ssh-style.example.com",
+            model="ssh-style-model",
+        )
+        llm = llm_factory_module.create_default_llm()
+
+        self.assertTrue(switched)
+        self.assertEqual(llm["api_key"], "EMPTY")
+        self.assertEqual(llm["base_url"], "https://ssh-style.example.com/v1")
+        self.assertEqual(llm["model"], "ssh-style-model")
+        self.assertEqual(llm["temperature"], 0.42)
+        self.assertIn(("https://ssh-style.example.com/v1", "EMPTY"), observed_requests)
+
+    def test_default_remote_llm_config_matches_ssh_vllm_defaults(self):
+        with mock.patch.object(
+            llm_service_module,
+            "ensure_ssh_openai_base_url",
+            return_value="http://127.0.0.1:18001/v1",
+        ):
+            config = llm_service_module.get_default_remote_llm_config()
+
+        self.assertEqual(config["api_key"], "EMPTY")
+        self.assertEqual(config["model"], "Qwen/Qwen3.5-9B")
+        self.assertEqual(config["base_url"], "http://127.0.0.1:18001/v1")
+        self.assertEqual(config["ssh"]["ssh_host"], "172.26.19.131")
+        self.assertEqual(config["ssh"]["ssh_port"], 8888)
+        self.assertEqual(config["ssh"]["ssh_username"], "root")
+        self.assertEqual(config["ssh"]["ssh_password"], "123456.a")
+        self.assertEqual(config["ssh"]["remote_host"], "127.0.0.1")
+        self.assertEqual(config["ssh"]["remote_port"], 8001)
+        self.assertEqual(config["ssh"]["local_host"], "127.0.0.1")
+        self.assertEqual(config["ssh"]["local_port"], 18001)
 
 
 class QueryPlannerTests(unittest.TestCase):

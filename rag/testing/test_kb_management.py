@@ -17,9 +17,11 @@ from fastapi.testclient import TestClient
 try:
     from rag.api_server import BackendServices, create_app
     from rag.kb_manager import KnowledgeBaseManager
+    from rag.llm_service import LLMConfigService
 except ImportError:
     from api_server import BackendServices, create_app
     from kb_manager import KnowledgeBaseManager
+    from llm_service import LLMConfigService
 
 
 class DummyChunkDoc:
@@ -469,6 +471,188 @@ class KnowledgeBaseApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 409)
         self.assertIn("文件已存在于知识库中", response.json()["detail"])
+
+
+class LLMConfigApiTests(unittest.TestCase):
+    def _build_llm_service(self, *, model_fetcher):
+        remote_config = {
+            "scheme": "http",
+            "host": "127.0.0.1",
+            "port": 8001,
+            "model": "remote-model",
+            "api_key": "EMPTY",
+            "base_url": "http://remote-server/v1",
+            "temperature": 0.1,
+            "ssh": {},
+        }
+        return LLMConfigService(
+            default_config_loader=lambda: dict(remote_config),
+            remote_config_loader=lambda: dict(remote_config),
+            llm_builder=lambda **kwargs: {"llm_config": kwargs},
+            model_fetcher=model_fetcher,
+        )
+
+    def _build_services(self, llm_service: LLMConfigService) -> BackendServices:
+        return BackendServices(
+            tasks_db={},
+            pdf_processor=object(),
+            rag_system=object(),
+            kb_manager=None,
+            llm_service=llm_service,
+            runtime_initialized=True,
+        )
+
+    def test_llm_config_api_switches_to_remote_and_refreshes_shared_llm(self):
+        llm_service = self._build_llm_service(
+            model_fetcher=lambda base_url, api_key, timeout: ["remote-model"]
+            if base_url == "http://remote-server/v1"
+            else [],
+        )
+        services = self._build_services(llm_service)
+        app = create_app(services=services, initialize_on_startup=False)
+
+        with TestClient(app) as client:
+            response = client.post("/api/llm/config", json={"temperature": 0.55})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"message": "设置已保存并正常连接"})
+        self.assertEqual(llm_service.get_runtime_state()["mode"], "remote")
+        self.assertEqual(llm_service.get_runtime_state()["temperature"], 0.55)
+        self.assertIsNotNone(services.llm)
+        self.assertEqual(services.llm["llm_config"]["api_key"], "EMPTY")
+        self.assertEqual(services.llm["llm_config"]["model"], "remote-model")
+        self.assertEqual(services.llm["llm_config"]["temperature"], 0.55)
+
+    def test_llm_config_api_switches_to_api_mode(self):
+        llm_service = self._build_llm_service(
+            model_fetcher=lambda base_url, api_key, timeout: ["remote-model"]
+            if base_url == "http://remote-server/v1"
+            else ["api-model"],
+        )
+        services = self._build_services(llm_service)
+        app = create_app(services=services, initialize_on_startup=False)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/llm/config",
+                json={
+                    "api_key": "sk-demo",
+                    "base_url": "https://example.com/v1",
+                    "model": "api-model",
+                    "temperature": 0.23,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {"message": "设置已保存并正常连接"})
+        runtime_state = llm_service.get_runtime_state()
+        self.assertEqual(runtime_state["mode"], "api")
+        self.assertEqual(runtime_state["api_key"], "sk-demo")
+        self.assertEqual(runtime_state["base_url"], "https://example.com/v1")
+        self.assertEqual(runtime_state["model"], "api-model")
+        self.assertEqual(runtime_state["temperature"], 0.23)
+        self.assertEqual(services.llm["llm_config"]["api_key"], "sk-demo")
+        self.assertEqual(services.llm["llm_config"]["base_url"], "https://example.com/v1")
+        self.assertEqual(services.llm["llm_config"]["model"], "api-model")
+        self.assertEqual(services.llm["llm_config"]["temperature"], 0.23)
+
+    def test_llm_config_api_returns_error_when_connection_validation_fails(self):
+        llm_service = self._build_llm_service(
+            model_fetcher=lambda base_url, api_key, timeout: [],
+        )
+        services = self._build_services(llm_service)
+        app = create_app(services=services, initialize_on_startup=False)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/llm/config",
+                json={
+                    "api_key": "sk-demo",
+                    "base_url": "https://example.com/v1",
+                    "model": "api-model",
+                },
+            )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json(), {"message": "参数错误，请正确填写"})
+        self.assertIsNone(services.llm)
+
+    def test_llm_config_api_temperature_only_switches_back_to_remote_ssh_style(self):
+        observed_requests: list[tuple[str, str]] = []
+
+        def model_fetcher(base_url, api_key, timeout):
+            observed_requests.append((base_url, api_key))
+            if base_url == "http://remote-server/v1":
+                return ["remote-model"]
+            if base_url == "https://example.com/v1":
+                return ["api-model"]
+            return []
+
+        llm_service = self._build_llm_service(model_fetcher=model_fetcher)
+        services = self._build_services(llm_service)
+        app = create_app(services=services, initialize_on_startup=False)
+
+        with TestClient(app) as client:
+            first_response = client.post(
+                "/api/llm/config",
+                json={
+                    "api_key": "sk-demo",
+                    "base_url": "https://example.com/v1",
+                    "model": "api-model",
+                    "temperature": 0.23,
+                },
+            )
+            second_response = client.post(
+                "/api/llm/config",
+                json={"temperature": 0.77},
+            )
+
+        self.assertEqual(first_response.status_code, 200)
+        self.assertEqual(second_response.status_code, 200)
+        self.assertEqual(llm_service.get_runtime_state()["mode"], "remote")
+        self.assertEqual(llm_service.get_runtime_state()["api_key"], "EMPTY")
+        self.assertEqual(llm_service.get_runtime_state()["base_url"], "")
+        self.assertEqual(llm_service.get_runtime_state()["temperature"], 0.77)
+        self.assertEqual(services.llm["llm_config"]["api_key"], "EMPTY")
+        self.assertEqual(services.llm["llm_config"]["base_url"], "http://remote-server/v1")
+        self.assertEqual(services.llm["llm_config"]["model"], "remote-model")
+        self.assertEqual(services.llm["llm_config"]["temperature"], 0.77)
+        self.assertIn(("http://remote-server/v1", "EMPTY"), observed_requests)
+
+    def test_llm_config_api_without_api_key_uses_remote_style_explicit_target(self):
+        observed_requests: list[tuple[str, str]] = []
+
+        def model_fetcher(base_url, api_key, timeout):
+            observed_requests.append((base_url, api_key))
+            if base_url == "https://ssh-style.example.com/v1" and api_key == "EMPTY":
+                return ["ssh-style-model"]
+            return []
+
+        llm_service = self._build_llm_service(model_fetcher=model_fetcher)
+        services = self._build_services(llm_service)
+        app = create_app(services=services, initialize_on_startup=False)
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/llm/config",
+                json={
+                    "base_url": "https://ssh-style.example.com",
+                    "model": "ssh-style-model",
+                    "temperature": 0.41,
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(llm_service.get_runtime_state()["mode"], "remote")
+        self.assertEqual(llm_service.get_runtime_state()["api_key"], "EMPTY")
+        self.assertEqual(llm_service.get_runtime_state()["base_url"], "https://ssh-style.example.com/v1")
+        self.assertEqual(llm_service.get_runtime_state()["model"], "ssh-style-model")
+        self.assertEqual(llm_service.get_runtime_state()["temperature"], 0.41)
+        self.assertEqual(services.llm["llm_config"]["api_key"], "EMPTY")
+        self.assertEqual(services.llm["llm_config"]["base_url"], "https://ssh-style.example.com/v1")
+        self.assertEqual(services.llm["llm_config"]["model"], "ssh-style-model")
+        self.assertEqual(services.llm["llm_config"]["temperature"], 0.41)
+        self.assertIn(("https://ssh-style.example.com/v1", "EMPTY"), observed_requests)
 
 
 if __name__ == "__main__":

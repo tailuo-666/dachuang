@@ -9,20 +9,21 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 try:
     from .agent.builder import RagService
     from .agent.runtime import context as research_context, init_runtime, set_progress_callback
     from .kb_manager import KnowledgeBaseManager
-    from .llm_factory import create_default_llm
+    from .llm_factory import create_default_llm, get_default_llm_service
     from .pdf_processor import PDFProcessor
     from .rag_system import setup_rag_system
 except ImportError:
     from agent.builder import RagService
     from agent.runtime import context as research_context, init_runtime, set_progress_callback
     from kb_manager import KnowledgeBaseManager
-    from llm_factory import create_default_llm
+    from llm_factory import create_default_llm, get_default_llm_service
     from pdf_processor import PDFProcessor
     from rag_system import setup_rag_system
 
@@ -34,6 +35,13 @@ class QuestionRequest(BaseModel):
     question: str
 
 
+class LLMConfigRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    temperature: float | None = None
+
+
 @dataclass
 class BackendServices:
     tasks_db: dict[str, Any] = field(default_factory=dict)
@@ -41,6 +49,7 @@ class BackendServices:
     pdf_processor: PDFProcessor | None = None
     rag_system: Any = None
     kb_manager: KnowledgeBaseManager | None = None
+    llm_service: Any = field(default_factory=get_default_llm_service)
     llm: Any = None
     runtime_initialized: bool = False
 
@@ -55,7 +64,7 @@ def initialize_services(services: BackendServices) -> BackendServices:
     if services.rag_system is None:
         services.rag_system = setup_rag_system()
     if services.llm is None:
-        services.llm = create_default_llm()
+        services.llm = services.llm_service.create_llm() if services.llm_service is not None else create_default_llm()
 
     init_runtime(
         rag_system=services.rag_system,
@@ -121,7 +130,16 @@ def create_app(
             set_progress_callback(timeline_cb)
             timeline_cb("Agent 开始处理查询。")
 
-            agent_service = current_services.rag_service_cls()
+            active_llm = current_services.llm
+            if active_llm is None:
+                active_llm = (
+                    current_services.llm_service.create_llm()
+                    if current_services.llm_service is not None
+                    else create_default_llm()
+                )
+                current_services.llm = active_llm
+
+            agent_service = current_services.rag_service_cls(llm=active_llm)
             result = agent_service.run(query=question, thread_id=task_id)
 
             timeline_cb("Agent 执行完成，正在提取结构化答案。")
@@ -178,6 +196,56 @@ def create_app(
         if task_id not in current_services.tasks_db:
             raise HTTPException(status_code=404, detail="Task not found")
         return current_services.tasks_db[task_id]
+
+    @app.post("/api/llm/config")
+    async def configure_llm(req: LLMConfigRequest) -> JSONResponse:
+        current_services: BackendServices = app.state.services
+        llm_service = current_services.llm_service or get_default_llm_service()
+        current_services.llm_service = llm_service
+
+        api_key = str(req.api_key or "").strip()
+        base_url = str(req.base_url or "").strip()
+        model = str(req.model or "").strip()
+        has_any_field = any([api_key, base_url, model, req.temperature is not None])
+        has_full_api_config = all([api_key, base_url, model])
+
+        success = False
+        if has_full_api_config:
+            success = llm_service.switch_to_api(
+                api_key=api_key,
+                base_url=base_url,
+                model=model,
+                temperature=req.temperature,
+            )
+        elif not api_key and has_any_field:
+            success = llm_service.switch_to_remote(
+                req.temperature,
+                base_url=base_url or None,
+                model=model or None,
+            )
+
+        if not success:
+            return JSONResponse(
+                status_code=400,
+                content={"message": "参数错误，请正确填写"},
+            )
+
+        current_services.llm = llm_service.create_llm()
+        if (
+            current_services.runtime_initialized
+            and current_services.rag_system is not None
+            and current_services.pdf_processor is not None
+        ):
+            init_runtime(
+                rag_system=current_services.rag_system,
+                pdf_processor=current_services.pdf_processor,
+                llm=current_services.llm,
+            )
+
+        return JSONResponse(
+            status_code=200,
+            content={"message": "设置已保存并正常连接"},
+        )
 
     @app.get("/api/kb/papers")
     async def list_kb_papers(keyword: str | None = Query(default=None)) -> dict[str, Any]:
