@@ -1,9 +1,22 @@
 # demo
 
+## agent链路文件
+
+- rag\agent\builder.py
+- rag\agent\middleware.py
+- rag\agent\tools\_impl.py
+- rag\agent\runtime.py
+- rag\agent\evidence.py
+- rag\query\optimizer.py
+- rag\retrieval\evaluator.py
+- rag\rag\_system.py
+- rag\schemas.py
+- rag\llm\_factory.py
+- rag\llm\_service.py
+
 ## SSH 测试命令
 
 先激活运行环境：
-
 
 ```powershell
 conda activate D:\conda_envs\pyth310_new
@@ -80,11 +93,7 @@ python -m rag.crawlers.standalone `
   --print-json
 ```
 
-### 当前完整流程
-
-这条链路现在已经按下面的顺序跑通：
-
-`standalone crawler -> remote LLM rewrite -> arXiv search -> PDF download -> remote OCR -> md -> remote BGE embeddings -> FAISS rebuild`
+<br />
 
 ### 当前分块机制
 
@@ -120,3 +129,4 @@ FAISS index rebuilt.
 - OCR 和 embedding 都走了远程服务
 - semantic chunking 成功完成
 - 根目录 `faiss/` 已经成功重建
+
